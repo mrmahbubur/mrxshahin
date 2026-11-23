@@ -3,10 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { GoogleGenAI } from '@google/genai';
 import sharp from 'sharp';
-import { escapeXml, validateSlug } from './security.ts';
+import { escapeXml, validateExternalUrl, validateSlug } from './security.ts';
 
 const THUMB_WIDTH = 1280;
 const THUMB_HEIGHT = 720;
+const MAX_SOURCE_IMAGE_BYTES = 5 * 1024 * 1024;
 
 export const THUMBNAILS_DIR = path.resolve(process.cwd(), 'data', 'thumbnails');
 
@@ -168,20 +169,73 @@ function buildTextOverlaySvg(title: string, siteName: string, themeColor?: strin
   </svg>`;
 }
 
+async function fetchSafeSourceImageBuffer(rawUrl: string): Promise<Buffer | null> {
+  try {
+    const valid = validateExternalUrl(rawUrl);
+    const res = await fetch(valid.toString(), {
+      method: 'GET',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(6000),
+      headers: {
+        'User-Agent': 'MRSAutoBlogBot/1.0',
+        Accept: 'image/png,image/jpeg,image/webp,image/*;q=0.8',
+      },
+    });
+    if (!res.ok) return null;
+
+    const finalUrl = res.url || valid.toString();
+    validateExternalUrl(finalUrl);
+
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.startsWith('image/') || contentType.includes('svg') || contentType.includes('icon')) {
+      return null;
+    }
+
+    const contentLength = Number(res.headers.get('content-length') || 0);
+    if (contentLength > MAX_SOURCE_IMAGE_BYTES) return null;
+
+    const arrBuf = await res.arrayBuffer();
+    if (arrBuf.byteLength < 2048 || arrBuf.byteLength > MAX_SOURCE_IMAGE_BYTES) return null;
+
+    const buf = Buffer.from(arrBuf);
+    const meta = await sharp(buf).metadata();
+    if (!meta.width || !meta.height || meta.width < 360 || meta.height < 200) {
+      return null;
+    }
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
 export async function buildFallbackThumbnailPng(
   title: string,
   siteName: string,
   slug: string,
   themeColor?: string | null
 ): Promise<Buffer> {
-  const bgSvg = buildFallbackBackgroundSvg(title, siteName, slug, themeColor);
-  const overlaySvg = buildTextOverlaySvg(title, siteName, themeColor);
+  try {
+    const bgSvg = buildFallbackBackgroundSvg(title, siteName, slug, themeColor);
+    const overlaySvg = buildTextOverlaySvg(title, siteName, themeColor);
 
-  return sharp(Buffer.from(bgSvg))
-    .resize(THUMB_WIDTH, THUMB_HEIGHT)
-    .composite([{ input: Buffer.from(overlaySvg), top: 0, left: 0 }])
-    .png({ compressionLevel: 8 })
-    .toBuffer();
+    return await sharp(Buffer.from(bgSvg))
+      .resize(THUMB_WIDTH, THUMB_HEIGHT)
+      .composite([{ input: Buffer.from(overlaySvg), top: 0, left: 0 }])
+      .png({ compressionLevel: 8 })
+      .toBuffer();
+  } catch {
+    // Guaranteed emergency 16:9 PNG so no post is ever left without a valid PNG image
+    return sharp({
+      create: {
+        width: THUMB_WIDTH,
+        height: THUMB_HEIGHT,
+        channels: 4,
+        background: { r: 15, g: 23, b: 42, alpha: 1 },
+      },
+    })
+      .png({ compressionLevel: 8 })
+      .toBuffer();
+  }
 }
 
 export async function generatePostThumbnail(options: {
@@ -189,11 +243,14 @@ export async function generatePostThumbnail(options: {
   siteName: string;
   slug: string;
   themeColor?: string | null;
+  sourceImageUrl?: string | null;
 }): Promise<{ buffer: Buffer; usedAiImage: boolean; fallbackReason?: string }> {
   const ai = getAiClient();
   let baseImageBuffer: Buffer | null = null;
+  let usedAiImage = false;
   let fallbackReason: string | undefined;
 
+  // Tier 1: Gemini Image Generation
   if (ai) {
     try {
       const prompt = `Minimalist editorial background artwork representing the software and web theme of "${options.siteName}" and the update "${options.title}". Modern architectural shapes, clean light and shadow depth, subtle studio texture, rich muted color palette. Strictly no text, no letters, no words, no logos, no watermarks.`;
@@ -202,7 +259,7 @@ export async function generatePostThumbnail(options: {
         model: 'gemini-3.1-flash-lite-image',
         contents: { parts: [{ text: prompt }] },
         config: {
-          abortSignal: AbortSignal.timeout(20000),
+          abortSignal: AbortSignal.timeout(10000),
           imageConfig: {
             aspectRatio: '16:9',
           },
@@ -213,6 +270,7 @@ export async function generatePostThumbnail(options: {
       for (const part of parts) {
         if (part.inlineData?.data) {
           baseImageBuffer = Buffer.from(part.inlineData.data, 'base64');
+          usedAiImage = true;
           break;
         }
       }
@@ -227,24 +285,33 @@ export async function generatePostThumbnail(options: {
     fallbackReason = 'GEMINI_API_KEY not configured';
   }
 
-  let finalPng: Buffer;
+  // Tier 2: Source site's verified OG/hero image when AI image generation is unavailable
+  if (!baseImageBuffer && options.sourceImageUrl) {
+    const sourceImg = await fetchSafeSourceImageBuffer(options.sourceImageUrl);
+    if (sourceImg) {
+      baseImageBuffer = sourceImg;
+    }
+  }
+
   const overlaySvg = buildTextOverlaySvg(options.title, options.siteName, options.themeColor);
 
   if (baseImageBuffer) {
     try {
-      finalPng = await sharp(baseImageBuffer)
+      const finalPng = await sharp(baseImageBuffer)
         .resize(THUMB_WIDTH, THUMB_HEIGHT, { fit: 'cover', position: 'center' })
         .composite([{ input: Buffer.from(overlaySvg), top: 0, left: 0 }])
         .png({ compressionLevel: 8 })
         .toBuffer();
       saveThumbnailToDiskCache(options.slug, finalPng);
-      return { buffer: finalPng, usedAiImage: true };
+      return { buffer: finalPng, usedAiImage, fallbackReason: usedAiImage ? undefined : fallbackReason };
     } catch (err) {
-      fallbackReason = `Sharp composite failed on AI image: ${err instanceof Error ? err.message : String(err)}`;
+      usedAiImage = false;
+      fallbackReason = `Sharp composite failed on background image: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
 
-  finalPng = await buildFallbackThumbnailPng(options.title, options.siteName, options.slug, options.themeColor);
+  // Tier 3/4: Guaranteed bespoke editorial SVG/PNG fallback
+  const finalPng = await buildFallbackThumbnailPng(options.title, options.siteName, options.slug, options.themeColor);
   saveThumbnailToDiskCache(options.slug, finalPng);
   return { buffer: finalPng, usedAiImage: false, fallbackReason };
 }

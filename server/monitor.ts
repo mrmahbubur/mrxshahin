@@ -183,17 +183,33 @@ function extractPageSignals(html: string, baseUrl: string): {
     }
   });
 
-  // Images
+  // Images (prioritize og:image / twitter:image for rich hero artwork)
   const images: ImageItem[] = [];
   const seenImgs = new Set<string>();
+  const metaHero =
+    $('meta[property="og:image"]').attr('content') ||
+    $('meta[name="twitter:image"]').attr('content') ||
+    $('meta[property="twitter:image"]').attr('content');
+  if (metaHero && !metaHero.startsWith('data:')) {
+    try {
+      const abs = new URL(metaHero, baseUrl).toString();
+      seenImgs.add(abs);
+      images.push({ src: abs, alt: title || 'Site preview' });
+    } catch {
+      // ignore invalid meta image
+    }
+  }
+
   $('img').each((_, el) => {
     const src = $(el).attr('src');
     const alt = ($(el).attr('alt') || '').replace(/\s+/g, ' ').trim();
-    if (src && !src.startsWith('data:') && !seenImgs.has(src)) {
+    if (src && !src.startsWith('data:')) {
       try {
         const abs = new URL(src, baseUrl).toString();
-        seenImgs.add(src);
-        images.push({ src: abs, alt });
+        if (!seenImgs.has(abs)) {
+          seenImgs.add(abs);
+          images.push({ src: abs, alt });
+        }
       } catch {
         // ignore
       }
@@ -474,6 +490,7 @@ function buildChangeReport(
       currentMetaDescription: current.metaDescription,
       currentHeadings: current.headings,
       currentMainTextExcerpt: current.mainText.slice(0, 6000),
+      heroImageUrl: current.images[0]?.src ?? null,
     };
   }
 
@@ -577,6 +594,7 @@ function buildChangeReport(
     currentMetaDescription: current.metaDescription,
     currentHeadings: current.headings,
     currentMainTextExcerpt: current.mainText.slice(0, 6000),
+    heroImageUrl: current.images[0]?.src ?? null,
   };
 }
 

@@ -18,12 +18,28 @@ export function ThumbnailImage({
   priority = false,
 }: ThumbnailImageProps) {
   const [failed, setFailed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     setFailed(false);
+    setRetryCount(0);
   }, [src]);
 
-  if (failed || !src) {
+  useEffect(() => {
+    if (!failed || retryCount >= 2 || !src) return;
+    const timer = setTimeout(() => {
+      setRetryCount((c) => c + 1);
+      setFailed(false);
+    }, retryCount === 0 ? 1000 : 2500);
+    return () => clearTimeout(timer);
+  }, [failed, retryCount, src]);
+
+  const effectiveSrc =
+    retryCount > 0 && src
+      ? `${src}${src.includes('?') ? '&' : '?'}r=${retryCount}`
+      : src;
+
+  if ((failed && retryCount >= 2) || !src) {
     return (
       <div
         className={`relative aspect-video w-full overflow-hidden bg-zinc-900 text-white flex flex-col justify-end p-5 ${className}`}
@@ -44,9 +60,9 @@ export function ThumbnailImage({
   }
 
   return (
-    <div className={`relative aspect-video w-full overflow-hidden bg-zinc-100 dark:bg-zinc-900 ${className}`}>
+    <div className={`relative aspect-video w-full overflow-hidden bg-zinc-900 ${className}`}>
       <img
-        src={src}
+        src={effectiveSrc}
         alt={alt}
         referrerPolicy="no-referrer"
         loading={priority ? 'eager' : 'lazy'}

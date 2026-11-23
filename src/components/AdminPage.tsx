@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { ActivityLog, AdminSite, AdminStats, FullPost, LogLevel } from '../types';
+import { ThumbnailImage } from './ThumbnailImage';
 
 interface AdminPageProps {
   token: string | null;
@@ -587,12 +588,18 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
               {filteredPosts.map((post) => (
                 <div key={post.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div className="flex items-start gap-4 min-w-0">
-                    <img
-                      src={post.thumbnailUrl}
-                      alt={post.title}
-                      referrerPolicy="no-referrer"
-                      className="w-28 aspect-video rounded-md object-cover border border-zinc-200 dark:border-zinc-800 shrink-0 bg-zinc-900"
-                    />
+                    <div className="w-28 rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-800 shrink-0">
+                      <ThumbnailImage
+                        src={
+                          post.updatedAt !== post.publishedAt
+                            ? `${post.thumbnailUrl}?v=${encodeURIComponent(post.updatedAt)}`
+                            : post.thumbnailUrl
+                        }
+                        alt={post.title}
+                        title={post.title}
+                        siteName={post.siteName}
+                      />
+                    </div>
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                         <span

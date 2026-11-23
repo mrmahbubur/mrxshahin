@@ -21,9 +21,12 @@ import {
   listAllPosts,
   listAllPublishedPostsForFeed,
   listLogs,
+  listPostsMissingThumbnails,
   listPublishedPosts,
   listSites,
   getCategoriesWithCounts,
+  getSiteById,
+  setPostThumbnail,
   setSetting,
   updatePost,
   updateSite,
@@ -177,6 +180,9 @@ function injectPostSeoIntoHtml(html: string, baseUrl: string, post: {
     <meta property="og:description" content="${escapeHtmlAttr(post.metaDescription)}" />
     <meta property="og:url" content="${escapeHtmlAttr(postUrl)}" />
     <meta property="og:image" content="${escapeHtmlAttr(thumbUrl)}" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1280" />
+    <meta property="og:image:height" content="720" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${escapeHtmlAttr(fullTitle)}" />
     <meta name="twitter:description" content="${escapeHtmlAttr(post.metaDescription)}" />
@@ -195,8 +201,33 @@ function injectPostSeoIntoHtml(html: string, baseUrl: string, post: {
     .replace('</head>', `${metaBlock}\n  </head>`);
 }
 
+async function backfillMissingThumbnails(): Promise<void> {
+  try {
+    const missing = await listPostsMissingThumbnails();
+    for (const item of missing) {
+      try {
+        const safeSlug = validateSlug(item.slug);
+        const site = item.siteId ? await getSiteById(item.siteId) : null;
+        const pngBuffer = await buildFallbackThumbnailPng(
+          item.title,
+          item.siteName,
+          safeSlug,
+          site?.themeColor
+        );
+        saveThumbnailToDiskCache(safeSlug, pngBuffer);
+        await setPostThumbnail(item.id, `/thumbnails/${safeSlug}.png`, pngBuffer);
+      } catch (err) {
+        console.warn(`Thumbnail backfill skipped for post ${item.id}:`, err);
+      }
+    }
+  } catch (err) {
+    console.warn('Thumbnail startup backfill warning:', err);
+  }
+}
+
 async function startServer(): Promise<void> {
   const dbEngine = await initDb();
+  await backfillMissingThumbnails();
   const app = express();
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '1mb' }));
@@ -232,7 +263,7 @@ async function startServer(): Promise<void> {
 
     try {
       const cachePath = getThumbnailCachePath(safeSlug);
-      if (fs.existsSync(cachePath)) {
+      if (fs.existsSync(cachePath) && fs.statSync(cachePath).size > 100) {
         res.setHeader('Content-Type', 'image/png');
         res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
         res.sendFile(cachePath);
@@ -245,8 +276,12 @@ async function startServer(): Promise<void> {
         return;
       }
 
-      const pngBuffer =
-        record.data ?? (await buildFallbackThumbnailPng(record.title, record.siteName, safeSlug));
+      let pngBuffer = record.data && record.data.length > 100 ? record.data : null;
+      if (!pngBuffer) {
+        pngBuffer = await buildFallbackThumbnailPng(record.title, record.siteName, safeSlug);
+        await setPostThumbnail(record.id, `/thumbnails/${safeSlug}.png`, pngBuffer);
+      }
+
       saveThumbnailToDiskCache(safeSlug, pngBuffer);
       res.setHeader('Content-Type', 'image/png');
       res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
@@ -274,12 +309,14 @@ async function startServer(): Promise<void> {
       <category>${escapeXml(post.category)}</category>
       <description>${escapeXml(post.summary)}</description>
       <enclosure url="${escapeXml(thumb)}" type="image/png" length="0" />
+      <media:thumbnail url="${escapeXml(thumb)}" width="1280" height="720" />
+      <media:content url="${escapeXml(thumb)}" medium="image" type="image/png" width="1280" height="720" />
     </item>`;
         })
         .join('\n');
 
       const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
   <channel>
     <title>M R S Auto Blog</title>
     <link>${escapeXml(baseUrl)}</link>

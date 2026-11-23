@@ -107,6 +107,7 @@ export interface ChangeReport {
   currentMetaDescription: string;
   currentHeadings: HeadingItem[];
   currentMainTextExcerpt: string;
+  heroImageUrl?: string | null;
 }
 
 export interface PostRecord {

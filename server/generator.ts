@@ -202,6 +202,7 @@ export async function generateAndSavePostFromReport(report: ChangeReport): Promi
     siteName: report.siteName,
     slug: uniqueSlug,
     themeColor: site?.themeColor,
+    sourceImageUrl: report.heroImageUrl,
   });
 
   if (!thumbResult.usedAiImage && thumbResult.fallbackReason) {
@@ -297,6 +298,7 @@ export async function regeneratePostContent(postId: number): Promise<PostRecord>
     siteName: existing.siteName,
     slug: existing.slug,
     themeColor: site?.themeColor,
+    sourceImageUrl: report.heroImageUrl,
   });
 
   const updated = await updatePost(postId, {
@@ -335,6 +337,7 @@ export async function regeneratePostThumbnailOnly(postId: number): Promise<PostR
     siteName: existing.siteName,
     slug: existing.slug,
     themeColor: site?.themeColor,
+    sourceImageUrl: existing.changeReport?.heroImageUrl,
   });
 
   const updated = await updatePost(postId, {

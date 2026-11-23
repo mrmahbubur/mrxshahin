@@ -298,14 +298,20 @@ function mapSnapshotRow(row: Record<string, unknown>): SnapshotRecord {
   };
 }
 
+function normalizePostThumbnailUrl(rawUrl: unknown, slug: string): string {
+  const trimmed = rawUrl ? String(rawUrl).trim() : '';
+  return trimmed.startsWith('/thumbnails/') ? trimmed : `/thumbnails/${slug}.png`;
+}
+
 function mapPostRow(row: Record<string, unknown>): PostRecord {
+  const slug = String(row.slug);
   return {
     id: Number(row.id),
     siteId: row.site_id !== null && row.site_id !== undefined ? Number(row.site_id) : null,
     siteName: String(row.site_name),
     siteUrl: String(row.site_url),
     title: String(row.title),
-    slug: String(row.slug),
+    slug,
     metaDescription: String(row.meta_description),
     summary: String(row.summary),
     contentHtml: String(row.content_html),
@@ -315,7 +321,7 @@ function mapPostRow(row: Record<string, unknown>): PostRecord {
     changeReport: safeJsonParse<ChangeReport | null>(row.change_report_json as string, null),
     status: (row.status === 'draft' ? 'draft' : 'published') as PostStatus,
     readingTimeMinutes: Number(row.reading_time_minutes || 4),
-    thumbnailUrl: String(row.thumbnail_url),
+    thumbnailUrl: normalizePostThumbnailUrl(row.thumbnail_url, slug),
     publishedAt: String(row.published_at),
     updatedAt: String(row.updated_at),
     createdAt: String(row.created_at),
@@ -323,20 +329,21 @@ function mapPostRow(row: Record<string, unknown>): PostRecord {
 }
 
 function mapPublicPostSummaryRow(row: Record<string, unknown>): PublicPostSummary {
+  const slug = String(row.slug);
   return {
     id: Number(row.id),
     siteId: row.site_id !== null && row.site_id !== undefined ? Number(row.site_id) : null,
     siteName: String(row.site_name),
     siteUrl: String(row.site_url),
     title: String(row.title),
-    slug: String(row.slug),
+    slug,
     metaDescription: String(row.meta_description),
     summary: String(row.summary),
     tags: safeJsonParse<string[]>(row.tags_json as string, []),
     category: String(row.category),
     status: (row.status === 'draft' ? 'draft' : 'published') as PostStatus,
     readingTimeMinutes: Number(row.reading_time_minutes || 4),
-    thumbnailUrl: String(row.thumbnail_url),
+    thumbnailUrl: normalizePostThumbnailUrl(row.thumbnail_url, slug),
     publishedAt: String(row.published_at),
     updatedAt: String(row.updated_at),
   };
@@ -976,9 +983,10 @@ export async function updatePost(
   const publishedAt =
     existing.status === 'draft' && patch.status === 'published' ? updatedAt : existing.publishedAt;
 
+  const nextSlug = patch.slug ?? existing.slug;
   const next = {
     title: patch.title ?? existing.title,
-    slug: patch.slug ?? existing.slug,
+    slug: nextSlug,
     metaDescription: patch.metaDescription ?? existing.metaDescription,
     summary: patch.summary ?? existing.summary,
     contentHtml: patch.contentHtml ?? existing.contentHtml,
@@ -986,7 +994,9 @@ export async function updatePost(
     category: patch.category ?? existing.category,
     status: patch.status ?? existing.status,
     readingTimeMinutes: patch.readingTimeMinutes ?? existing.readingTimeMinutes,
-    thumbnailUrl: patch.thumbnailUrl ?? existing.thumbnailUrl,
+    thumbnailUrl:
+      patch.thumbnailUrl ??
+      (patch.slug && patch.slug !== existing.slug ? `/thumbnails/${nextSlug}.png` : existing.thumbnailUrl),
   };
 
   if (pgPool) {
@@ -1088,26 +1098,86 @@ export async function updatePost(
   return getPostById(id);
 }
 
-export async function getThumbnailDataBySlug(slug: string): Promise<{ data: Buffer | null; title: string; siteName: string } | null> {
+export async function getThumbnailDataBySlug(
+  slug: string
+): Promise<{ id: number; data: Buffer | null; title: string; siteName: string } | null> {
   if (pgPool) {
-    const res = await pgPool.query('SELECT thumbnail_data, title, site_name FROM posts WHERE slug = $1 LIMIT 1', [slug]);
+    const res = await pgPool.query(
+      'SELECT id, thumbnail_data, title, site_name FROM posts WHERE slug = $1 LIMIT 1',
+      [slug]
+    );
     const row = res.rows[0];
     if (!row) return null;
     return {
+      id: Number(row.id),
       data: row.thumbnail_data ? Buffer.from(row.thumbnail_data) : null,
       title: String(row.title),
       siteName: String(row.site_name),
     };
   }
   const row = sqliteDb!
-    .prepare('SELECT thumbnail_data, title, site_name FROM posts WHERE slug = ? LIMIT 1')
-    .get(slug) as { thumbnail_data: Buffer | null; title: string; site_name: string } | undefined;
+    .prepare('SELECT id, thumbnail_data, title, site_name FROM posts WHERE slug = ? LIMIT 1')
+    .get(slug) as { id: number; thumbnail_data: Buffer | null; title: string; site_name: string } | undefined;
   if (!row) return null;
   return {
+    id: Number(row.id),
     data: row.thumbnail_data ? Buffer.from(row.thumbnail_data) : null,
     title: String(row.title),
     siteName: String(row.site_name),
   };
+}
+
+export async function listPostsMissingThumbnails(): Promise<
+  Array<{ id: number; slug: string; title: string; siteName: string; siteId: number | null }>
+> {
+  if (pgPool) {
+    const res = await pgPool.query(
+      `SELECT id, slug, title, site_name, site_id
+       FROM posts
+       WHERE thumbnail_data IS NULL
+          OR octet_length(thumbnail_data) < 100
+          OR thumbnail_url IS NULL
+          OR thumbnail_url NOT LIKE '/thumbnails/%'`
+    );
+    return res.rows.map((r) => ({
+      id: Number(r.id),
+      slug: String(r.slug),
+      title: String(r.title),
+      siteName: String(r.site_name),
+      siteId: r.site_id !== null && r.site_id !== undefined ? Number(r.site_id) : null,
+    }));
+  }
+  const rows = sqliteDb!
+    .prepare(
+      `SELECT id, slug, title, site_name, site_id
+       FROM posts
+       WHERE thumbnail_data IS NULL
+          OR length(thumbnail_data) < 100
+          OR thumbnail_url IS NULL
+          OR thumbnail_url NOT LIKE '/thumbnails/%'`
+    )
+    .all() as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    id: Number(r.id),
+    slug: String(r.slug),
+    title: String(r.title),
+    siteName: String(r.site_name),
+    siteId: r.site_id !== null && r.site_id !== undefined ? Number(r.site_id) : null,
+  }));
+}
+
+export async function setPostThumbnail(id: number, thumbnailUrl: string, thumbnailData: Buffer): Promise<void> {
+  if (pgPool) {
+    await pgPool.query('UPDATE posts SET thumbnail_url = $1, thumbnail_data = $2 WHERE id = $3', [
+      thumbnailUrl,
+      thumbnailData,
+      id,
+    ]);
+    return;
+  }
+  sqliteDb!
+    .prepare('UPDATE posts SET thumbnail_url = ?, thumbnail_data = ? WHERE id = ?')
+    .run(thumbnailUrl, thumbnailData, id);
 }
 
 export async function deletePost(id: number): Promise<boolean> {
