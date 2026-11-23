@@ -47,20 +47,34 @@ import { buildFallbackThumbnailPng, getThumbnailCachePath, saveThumbnailToDiskCa
 const PORT = Number(process.env.PORT || 3000);
 const IS_PROD = process.env.NODE_ENV === 'production';
 
+const RESERVED_ROUTE_PREFIXES = [
+  '/api',
+  '/post',
+  '/category',
+  '/thumbnails',
+  '/health',
+  '/robots.txt',
+  '/sitemap.xml',
+  '/rss.xml',
+  '/assets',
+  '/src',
+];
+
 function resolveAdminPath(): string {
   const raw = (process.env.ADMIN_PATH || '/admin-mrs').trim();
-  const withSlash = raw.startsWith('/') ? raw : `/${raw}`;
+  const collapsed = raw.replace(/\/+/g, '/');
+  const withSlash = collapsed.startsWith('/') ? collapsed : `/${collapsed}`;
   const normalized = withSlash.replace(/\/+$/, '');
   const validFormat = /^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(normalized);
-  if (
-    !validFormat ||
-    normalized === '/' ||
-    normalized === '/health' ||
-    normalized.startsWith('/api') ||
-    normalized.startsWith('/post') ||
-    normalized.startsWith('/category') ||
-    normalized.startsWith('/thumbnails')
-  ) {
+  if (!validFormat || normalized.length > 80) {
+    return '/admin-mrs';
+  }
+
+  const lower = normalized.toLowerCase();
+  const collides = RESERVED_ROUTE_PREFIXES.some(
+    (prefix) => lower === prefix || lower.startsWith(`${prefix}/`)
+  );
+  if (collides) {
     return '/admin-mrs';
   }
   return normalized;
@@ -69,22 +83,34 @@ function resolveAdminPath(): string {
 const ADMIN_PATH = resolveAdminPath();
 
 function isAdminHtmlRequest(reqPath: string): boolean {
-  const cleanPath = reqPath.split('?')[0].replace(/\/+$/, '') || '/';
+  const cleanPath = reqPath.split('?')[0].replace(/\/+/g, '/').replace(/\/+$/, '') || '/';
   return cleanPath === ADMIN_PATH || cleanPath.startsWith(`${ADMIN_PATH}/`);
 }
 
+function escapeForInlineScript(value: string): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 function injectAdminRouteIntoHtml(html: string): string {
-  const safePathJson = JSON.stringify(ADMIN_PATH).replace(/</g, '\\u003c');
+  const safePathJson = escapeForInlineScript(ADMIN_PATH);
   const adminMeta = `
     <title>Admin Console – M R S Auto Blog</title>
     <meta name="robots" content="noindex, nofollow" />
     <script>window.__MRS_ADMIN_PATH__ = ${safePathJson};</script>
   `;
   return html
-    .replace(/<title>[\s\S]*?<\/title>/i, '')
-    .replace(/<meta\s+name="description"[\s\S]*?\/>/i, '')
-    .replace(/<meta\s+property="og:[^"]*"[\s\S]*?\/>/gi, '')
-    .replace(/<meta\s+name="twitter:[^"]*"[\s\S]*?\/>/gi, '')
+    .replace(/<title>[\s\S]*?<\/title>/gi, '')
+    .replace(/<meta\s+[^>]*name=["'](?:description|robots)["'][^>]*>/gi, '')
+    .replace(/<meta\s+[^>]*property=["']og:[^"']*["'][^>]*>/gi, '')
+    .replace(/<meta\s+[^>]*name=["']twitter:[^"']*["'][^>]*>/gi, '')
+    .replace(/<link\s+[^>]*rel=["']canonical["'][^>]*>/gi, '')
+    .replace(/<link\s+[^>]*type=["']application\/rss\+xml["'][^>]*>/gi, '')
+    .replace(/<script\s+type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi, '')
     .replace('</head>', `${adminMeta}\n  </head>`);
 }
 
