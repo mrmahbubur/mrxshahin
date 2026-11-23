@@ -1,0 +1,6 @@
+{
+  "name": "M R S Auto Blog",
+  "description": "Automated editorial blog platform monitoring websites for updates and innovations, publishing AI-authored dispatches with generated 16:9 thumbnails.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
