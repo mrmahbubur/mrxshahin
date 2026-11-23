@@ -78,6 +78,23 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
 
   useEffect(() => {
     document.title = 'Admin Console – M R S Auto Blog';
+    let meta = document.querySelector('meta[name="robots"]') as HTMLMetaElement | null;
+    const existed = Boolean(meta);
+    const prevContent = meta?.content || '';
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.name = 'robots';
+      document.head.appendChild(meta);
+    }
+    meta.content = 'noindex, nofollow';
+
+    return () => {
+      if (!existed && meta) {
+        meta.remove();
+      } else if (meta) {
+        meta.content = prevContent;
+      }
+    };
   }, []);
 
   const checkAuthStatus = useCallback(async () => {
@@ -269,7 +286,7 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
     setEditSummary(post.summary);
     setEditMeta(post.metaDescription);
     setEditTags(post.tags.join(', '));
-    setEditStatus(post.status);
+    setEditStatus(post.status ?? 'published');
     setEditHtml(post.contentHtml);
   };
 

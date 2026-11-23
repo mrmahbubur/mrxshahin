@@ -42,7 +42,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
           M R S Auto Blog
         </a>
 
-        {/* Zone 2: Concise single-line navigation links */}
+        {/* Zone 2: Concise single-line public navigation links */}
         <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           <a
             href="/"
@@ -54,11 +54,13 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             Dispatches
           </a>
           <a
-            href="/#sites"
-            onClick={(e) => handleLinkClick(e, '/#sites')}
-            className="whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
+            href="/#categories"
+            onClick={(e) => handleLinkClick(e, '/#categories')}
+            className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 ${
+              currentPath.startsWith('/category/') ? 'text-zinc-900 dark:text-zinc-100 underline underline-offset-8 decoration-blue-600 dark:decoration-blue-400 decoration-2' : ''
+            }`}
           >
-            Sites
+            Categories
           </a>
           <a
             href="/rss.xml"
@@ -67,15 +69,6 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             className="whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
           >
             RSS Feed
-          </a>
-          <a
-            href="/admin"
-            onClick={(e) => handleLinkClick(e, '/admin')}
-            className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 ${
-              currentPath.startsWith('/admin') ? 'text-zinc-900 dark:text-zinc-100 underline underline-offset-8 decoration-blue-600 dark:decoration-blue-400 decoration-2' : ''
-            }`}
-          >
-            Admin
           </a>
         </nav>
 
@@ -112,11 +105,11 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             Dispatches
           </a>
           <a
-            href="/#sites"
-            onClick={(e) => handleLinkClick(e, '/#sites')}
+            href="/#categories"
+            onClick={(e) => handleLinkClick(e, '/#categories')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
           >
-            Sites
+            Categories
           </a>
           <a
             href="/rss.xml"
@@ -125,13 +118,6 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
           >
             RSS Feed
-          </a>
-          <a
-            href="/admin"
-            onClick={(e) => handleLinkClick(e, '/admin')}
-            className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
-          >
-            Admin
           </a>
         </nav>
       )}

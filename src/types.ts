@@ -13,7 +13,7 @@ export interface PublicPostSummary {
   summary: string;
   tags: string[];
   category: string;
-  status: PostStatus;
+  status?: PostStatus;
   readingTimeMinutes: number;
   thumbnailUrl: string;
   publishedAt: string;

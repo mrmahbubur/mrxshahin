@@ -345,19 +345,19 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
             </nav>
           )}
 
-          <div className="space-y-2 border-t border-zinc-200 dark:border-zinc-800 pt-6 text-xs">
+          <div className="space-y-3 border-t border-zinc-200 dark:border-zinc-800 pt-6 text-xs">
             <h3 className="font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
-              Source Property
+              Website
             </h3>
-            <p className="font-medium text-zinc-900 dark:text-zinc-100">{post.siteName}</p>
+            <p className="font-medium text-zinc-900 dark:text-zinc-100">{post.category}</p>
             <a
               href={post.siteUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-blue-700 dark:text-blue-400 hover:underline font-mono break-all"
+              className="inline-flex items-center gap-1.5 font-medium text-blue-700 dark:text-blue-400 hover:underline"
             >
-              <span>{post.siteUrl.replace(/^https?:\/\//, '')}</span>
-              <ArrowUpRight className="h-3 w-3 shrink-0" />
+              <span>Visit site</span>
+              <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
             </a>
           </div>
 

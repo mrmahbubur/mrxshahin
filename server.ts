@@ -47,6 +47,40 @@ import { buildFallbackThumbnailPng, getThumbnailCachePath, saveThumbnailToDiskCa
 const PORT = Number(process.env.PORT || 3000);
 const IS_PROD = process.env.NODE_ENV === 'production';
 
+function resolveAdminPath(): string {
+  const raw = (process.env.ADMIN_PATH || '/admin-mrs').trim();
+  const withSlash = raw.startsWith('/') ? raw : `/${raw}`;
+  const normalized = withSlash.replace(/\/+$/, '');
+  if (
+    !normalized ||
+    normalized === '/' ||
+    normalized.startsWith('/api') ||
+    normalized.startsWith('/post') ||
+    normalized.startsWith('/category') ||
+    normalized.startsWith('/thumbnails')
+  ) {
+    return '/admin-mrs';
+  }
+  return normalized;
+}
+
+const ADMIN_PATH = resolveAdminPath();
+
+function isAdminHtmlRequest(reqPath: string): boolean {
+  const cleanPath = reqPath.split('?')[0].replace(/\/+$/, '') || '/';
+  return cleanPath === ADMIN_PATH || cleanPath.startsWith(`${ADMIN_PATH}/`);
+}
+
+function injectAdminRouteIntoHtml(html: string): string {
+  const adminMeta = `
+    <meta name="robots" content="noindex, nofollow" />
+    <script>window.__MRS_ADMIN_PATH__ = ${JSON.stringify(ADMIN_PATH)};</script>
+  `;
+  return html
+    .replace(/<title>[\s\S]*?<\/title>/i, '<title>Admin Console – M R S Auto Blog</title>')
+    .replace('</head>', `${adminMeta}\n  </head>`);
+}
+
 function resolveBaseUrl(req: express.Request): string {
   const configured = process.env.SITE_URL?.trim() || process.env.APP_URL?.trim();
   if (configured) {
@@ -129,15 +163,18 @@ async function startServer(): Promise<void> {
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '1mb' }));
 
-  // Health Check
+  // Health Check (minimal response with no internal details)
   app.get('/health', (_req, res) => {
-    res.json({
-      status: 'ok',
-      database: dbEngine,
-      checkInProgress: isCheckRunning(),
-      uptimeSeconds: Math.floor(process.uptime()),
-      timestamp: new Date().toISOString(),
-    });
+    res.json({ status: 'ok' });
+  });
+
+  // Robots.txt disallowing hidden admin route and admin APIs
+  app.get('/robots.txt', (req, res) => {
+    const baseUrl = resolveBaseUrl(req);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(
+      `User-agent: *\nDisallow: ${ADMIN_PATH}\nDisallow: /api/admin\nSitemap: ${baseUrl}/sitemap.xml\n`
+    );
   });
 
   // Persistent / Cached Thumbnail Serving
@@ -261,9 +298,31 @@ ${urlsXml}
         getCategoriesWithCounts(),
       ]);
 
-      res.json({ ...feed, categories });
-    } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to load posts' });
+      const publicPosts = feed.posts.map((p) => ({
+        id: p.id,
+        siteName: p.siteName,
+        siteUrl: p.siteUrl,
+        title: p.title,
+        slug: p.slug,
+        metaDescription: p.metaDescription,
+        summary: p.summary,
+        tags: p.tags,
+        category: p.category,
+        readingTimeMinutes: p.readingTimeMinutes,
+        thumbnailUrl: p.thumbnailUrl,
+        publishedAt: p.publishedAt,
+        updatedAt: p.updatedAt,
+      }));
+
+      res.json({
+        posts: publicPosts,
+        total: feed.total,
+        page: feed.page,
+        totalPages: feed.totalPages,
+        categories,
+      });
+    } catch {
+      res.status(500).json({ error: 'Failed to load posts' });
     }
   });
 
@@ -276,30 +335,41 @@ ${urlsXml}
         return;
       }
       const related = await getRelatedPosts(post.id, post.category, 3);
-      res.json({ post, related });
-    } catch {
-      res.status(404).json({ error: 'Post not found' });
-    }
-  });
-
-  app.get('/api/sites', async (_req, res) => {
-    try {
-      const sites = await listSites();
       res.json({
-        sites: sites
-          .filter((s) => s.active)
-          .map((s) => ({
-            id: s.id,
-            name: s.name,
-            url: s.url,
-            source: s.source,
-            lastCheckedAt: s.lastCheckedAt,
-            lastStatus: s.lastStatus,
-            postCount: s.postCount ?? 0,
-          })),
+        post: {
+          id: post.id,
+          siteName: post.siteName,
+          siteUrl: post.siteUrl,
+          title: post.title,
+          slug: post.slug,
+          metaDescription: post.metaDescription,
+          summary: post.summary,
+          contentHtml: post.contentHtml,
+          tags: post.tags,
+          category: post.category,
+          readingTimeMinutes: post.readingTimeMinutes,
+          thumbnailUrl: post.thumbnailUrl,
+          publishedAt: post.publishedAt,
+          updatedAt: post.updatedAt,
+        },
+        related: related.map((r) => ({
+          id: r.id,
+          siteName: r.siteName,
+          siteUrl: r.siteUrl,
+          title: r.title,
+          slug: r.slug,
+          metaDescription: r.metaDescription,
+          summary: r.summary,
+          tags: r.tags,
+          category: r.category,
+          readingTimeMinutes: r.readingTimeMinutes,
+          thumbnailUrl: r.thumbnailUrl,
+          publishedAt: r.publishedAt,
+          updatedAt: r.updatedAt,
+        })),
       });
     } catch {
-      res.status(500).json({ error: 'Failed to load sites' });
+      res.status(404).json({ error: 'Post not found' });
     }
   });
 
@@ -663,11 +733,16 @@ ${urlsXml}
         let template = fs.readFileSync(templatePath, 'utf-8');
         template = await vite.transformIndexHtml(req.originalUrl, template);
 
-        const match = req.originalUrl.match(/^\/post\/([a-z0-9-]+)(?:\?.*)?$/i);
-        if (match) {
-          const post = await getPostBySlug(match[1].toLowerCase(), false);
-          if (post) {
-            template = injectPostSeoIntoHtml(template, resolveBaseUrl(req), post);
+        if (isAdminHtmlRequest(req.originalUrl)) {
+          template = injectAdminRouteIntoHtml(template);
+          res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+        } else {
+          const match = req.originalUrl.match(/^\/post\/([a-z0-9-]+)(?:\?.*)?$/i);
+          if (match) {
+            const post = await getPostBySlug(match[1].toLowerCase(), false);
+            if (post) {
+              template = injectPostSeoIntoHtml(template, resolveBaseUrl(req), post);
+            }
           }
         }
 
@@ -686,11 +761,16 @@ ${urlsXml}
         const indexPath = path.join(distDir, 'index.html');
         let html = fs.readFileSync(indexPath, 'utf-8');
 
-        const match = req.originalUrl.match(/^\/post\/([a-z0-9-]+)(?:\?.*)?$/i);
-        if (match) {
-          const post = await getPostBySlug(match[1].toLowerCase(), false);
-          if (post) {
-            html = injectPostSeoIntoHtml(html, resolveBaseUrl(req), post);
+        if (isAdminHtmlRequest(req.originalUrl)) {
+          html = injectAdminRouteIntoHtml(html);
+          res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+        } else {
+          const match = req.originalUrl.match(/^\/post\/([a-z0-9-]+)(?:\?.*)?$/i);
+          if (match) {
+            const post = await getPostBySlug(match[1].toLowerCase(), false);
+            if (post) {
+              html = injectPostSeoIntoHtml(html, resolveBaseUrl(req), post);
+            }
           }
         }
 

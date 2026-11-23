@@ -42,6 +42,10 @@ const IGNORED_HUB_DOMAINS = new Set([
   'discord.gg',
   'discord.com',
   't.me',
+  'gravatar.com',
+  'bsky.app',
+  'mastodon.social',
+  'threads.net',
   'fonts.googleapis.com',
   'fonts.gstatic.com',
   'cdn.jsdelivr.net',
@@ -585,27 +589,21 @@ export async function syncHubSitesOnly(): Promise<{ discovered: number; added: n
     const seenUrls = new Set<string>();
     const candidates: Array<{ name: string; url: string; githubRepo: string | null }> = [];
 
-    $('a[href]').each((_, el) => {
-      const href = $(el).attr('href');
-      const text = $(el).text();
-      if (!href) return;
+    const addCandidate = (rawHref: string, rawLabel: string) => {
       try {
-        const abs = normalizeUrl(new URL(href, hubUrl).toString());
+        const abs = normalizeUrl(new URL(rawHref, hubUrl).toString());
         const parsed = new URL(abs);
         const host = parsed.hostname.toLowerCase();
 
         if (host === hubHost) return;
         if (IGNORED_HUB_DOMAINS.has(host) || IGNORED_HUB_DOMAINS.has(host.replace(/^www\./, ''))) return;
-
-        // If it's a GitHub repo link, attach as a potential githubRepo reference if not a github.io site
-        if (host === 'github.com' || host === 'www.github.com') {
-          return;
-        }
+        if (host === 'github.com' || host === 'www.github.com') return;
 
         if (!seenUrls.has(abs)) {
           seenUrls.add(abs);
+          const shortTitle = rawLabel.split(/\s+[—–-]\s+/)[0]?.trim() || rawLabel;
           candidates.push({
-            name: deriveSiteName(text, abs),
+            name: deriveSiteName(shortTitle, abs),
             url: abs,
             githubRepo: null,
           });
@@ -613,9 +611,44 @@ export async function syncHubSitesOnly(): Promise<{ discovered: number; added: n
       } catch {
         // ignore malformed or blocked links
       }
+    };
+
+    // 1. Static HTML anchor links
+    $('a[href]').each((_, el) => {
+      const href = $(el).attr('href');
+      const text = $(el).text();
+      if (href) addCandidate(href, text);
     });
 
-    // Also include the hub itself as a monitored property if no outbound links were rendered statically (e.g. client-rendered hub)
+    // 2. Hub RSS/Atom feed project items (useful for client-rendered SPA hubs)
+    const rssHref =
+      $('link[rel="alternate"][type*="rss"], link[rel="alternate"][type*="atom"]').first().attr('href') ||
+      '/rss.xml';
+    try {
+      const hubRssUrl = new URL(rssHref, hubUrl).toString();
+      const rssEntries = await fetchRssItems(hubRssUrl);
+      for (const entry of rssEntries) {
+        if (entry.link) addCandidate(entry.link, entry.title);
+      }
+    } catch {
+      // ignore if hub has no RSS
+    }
+
+    // 3. Structured JSON-LD sameAs links
+    $('script[type="application/ld+json"]').each((_, el) => {
+      try {
+        const parsed = JSON.parse($(el).text()) as { sameAs?: unknown };
+        if (Array.isArray(parsed.sameAs)) {
+          for (const item of parsed.sameAs) {
+            if (typeof item === 'string') addCandidate(item, '');
+          }
+        }
+      } catch {
+        // ignore malformed JSON-LD
+      }
+    });
+
+    // Ensure hub itself is included if no external sites were found
     if (candidates.length === 0) {
       candidates.push({
         name: 'M R X Shahin Studio',
