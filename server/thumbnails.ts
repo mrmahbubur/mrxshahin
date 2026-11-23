@@ -202,6 +202,7 @@ export async function generatePostThumbnail(options: {
         model: 'gemini-3.1-flash-lite-image',
         contents: { parts: [{ text: prompt }] },
         config: {
+          abortSignal: AbortSignal.timeout(20000),
           imageConfig: {
             aspectRatio: '16:9',
           },

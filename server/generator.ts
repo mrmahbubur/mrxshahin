@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import * as cheerio from 'cheerio';
 import {
   addLog,
@@ -9,6 +9,7 @@ import {
   getSiteById,
   updatePost,
 } from './db.ts';
+import { emitPublicPostPublished, emitPublicPostUpdated } from './events.ts';
 import { sanitizePostHtml, slugify } from './security.ts';
 import { generatePostThumbnail } from './thumbnails.ts';
 import type { ChangeReport, PostRecord, PostStatus } from './types.ts';
@@ -106,31 +107,64 @@ OUTPUT REQUIREMENTS:
 async function callGeminiForArticle(report: ChangeReport): Promise<GeneratedArticlePayload> {
   const ai = getAiClient();
   const prompt = buildGenerationPrompt(report);
+  const models = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+  let response: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
+  let lastErr: unknown;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-4-hydrogen',
-    contents: prompt,
-    config: {
-      systemInstruction:
-        'You are an objective editorial technology journalist. Never fabricate metrics, features, or quotes. Output valid JSON matching the requested schema.',
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          title: { type: Type.STRING },
-          slug: { type: Type.STRING },
-          metaDescription: { type: Type.STRING },
-          summary: { type: Type.STRING },
-          tags: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    const thinkingLevel = model === 'gemini-3.1-flash-lite' ? ThinkingLevel.MINIMAL : ThinkingLevel.LOW;
+    try {
+      response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          abortSignal: AbortSignal.timeout(25000),
+          thinkingConfig: { thinkingLevel },
+          systemInstruction:
+            'You are an objective editorial technology journalist. Never fabricate metrics, features, or quotes. Output valid JSON matching the requested schema.',
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              slug: { type: Type.STRING },
+              metaDescription: { type: Type.STRING },
+              summary: { type: Type.STRING },
+              tags: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              contentHtml: { type: Type.STRING },
+            },
+            required: ['title', 'slug', 'metaDescription', 'summary', 'tags', 'contentHtml'],
           },
-          contentHtml: { type: Type.STRING },
         },
-        required: ['title', 'slug', 'metaDescription', 'summary', 'tags', 'contentHtml'],
-      },
-    },
-  });
+      });
+      break;
+    } catch (err) {
+      lastErr = err;
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+      const errName = err instanceof Error ? err.name : '';
+      const isTransient =
+        errName === 'AbortError' ||
+        errName === 'TimeoutError' ||
+        msg.includes('503') ||
+        msg.includes('429') ||
+        msg.includes('unavailable') ||
+        msg.includes('high demand') ||
+        msg.includes('aborted') ||
+        msg.includes('timeout');
+      if (!isTransient || i === models.length - 1) {
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+    }
+  }
+
+  if (!response) {
+    throw lastErr instanceof Error ? lastErr : new Error('Gemini generation failed');
+  }
 
   const rawText = response.text?.trim();
   if (!rawText) {
@@ -217,6 +251,7 @@ export async function generateAndSavePostFromReport(report: ChangeReport): Promi
     details: `Slug: ${post.slug} (${post.readingTimeMinutes} min read)`,
   });
 
+  emitPublicPostPublished(post);
   return post;
 }
 
@@ -284,6 +319,7 @@ export async function regeneratePostContent(postId: number): Promise<PostRecord>
     message: `Regenerated post "${updated.title}"`,
   });
 
+  emitPublicPostUpdated(updated);
   return updated;
 }
 
@@ -315,5 +351,6 @@ export async function regeneratePostThumbnailOnly(postId: number): Promise<PostR
     details: thumbResult.fallbackReason,
   });
 
+  emitPublicPostUpdated(updated);
   return updated;
 }

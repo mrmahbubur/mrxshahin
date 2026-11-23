@@ -9,7 +9,7 @@ An automated full-stack editorial blog platform that continuously monitors linke
 - **Noise-Filtered Change Detection**: Normalizes timestamps, visitor counters, cookie banners, and whitespace before hashing and diffing so trivial updates never trigger duplicate posts.
 - **Gemini Authoring & 16:9 Thumbnails**: Generates grounded 800–1,500 word HTML articles (`gemini-4-hydrogen`), sanitizes all HTML before storage, and composites readable 16:9 PNG thumbnails (`/thumbnails/<slug>.png`) using Gemini image generation (`gemini-3.1-flash-lite-image`) with an automatic SVG-to-PNG fallback.
 - **Persistent Storage**: Uses PostgreSQL via `DATABASE_URL` in production (including binary thumbnail storage so images survive ephemeral container redeploys) and falls back automatically to SQLite (`./data/autoblog.db`) for local development.
-- **Public Blog & Feeds**: Responsive light/dark editorial frontend showing only published blog posts with category filtering, search, pagination, table of contents, related posts, Open Graph tags, `/rss.xml`, `/sitemap.xml`, `robots.txt`, and `/health`.
+- **Public Blog & Real-Time Feeds**: Responsive light/dark editorial frontend showing only published blog posts with live Server-Sent Events (`/api/posts/stream`) so newly generated posts appear on the site automatically in real time without page reloads, GitHub commits, or Render redeploys. Includes category filtering, search, pagination, table of contents, related posts, Open Graph tags, `/rss.xml`, `/sitemap.xml`, `robots.txt`, and `/health`.
 - **Hidden Rate-Limited Admin Console (`ADMIN_PATH`, default `/admin-mrs`)**: Password-protected dashboard (`noindex`) to add/pause/remove sites, run manual checks, toggle Draft vs. Auto-Publish mode, edit or regenerate posts/thumbnails, and inspect the Activity Log.
 
 ## Local Setup
@@ -54,7 +54,8 @@ An automated full-stack editorial blog platform that continuously monitors linke
 | `ADMIN_PASSWORD` | Recommended | First-run setup | Password for the hidden admin console. If omitted on first launch, the admin route shows a one-time setup form. |
 | `ADMIN_PATH` | No | `/admin-mrs` | Hidden URL path for the admin console (disallowed in `robots.txt` and tagged `noindex`). |
 | `GITHUB_TOKEN` | No | — | Optional GitHub token for higher API rate limits when monitoring GitHub repositories. |
-| `CHECK_INTERVAL_MINUTES` | No | `10` | Monitoring interval in minutes for the `node-cron` scheduler. |
+| `CHECK_INTERVAL_MINUTES` | No | `1` | Monitoring interval in minutes for automatic real-time change detection. |
+| `CHECK_INTERVAL_SECONDS` | No | — | Optional sub-minute polling interval in seconds (min `15`; overrides `CHECK_INTERVAL_MINUTES` when set). |
 | `SITE_URL` | Production | Request origin | Canonical public URL (e.g. `https://blog.example.com`) used in `/rss.xml`, `/sitemap.xml`, and Open Graph meta tags. |
 | `PORT` | No | `3000` | HTTP port bound by the Express server (`process.env.PORT`). |
 
@@ -84,9 +85,9 @@ An automated full-stack editorial blog platform that continuously monitors linke
    - `ADMIN_PASSWORD=<strong-admin-password>`
    - `ADMIN_PATH=/admin-mrs` (or your preferred secret path)
    - `SITE_URL=https://<your-service>.onrender.com`
-   - `CHECK_INTERVAL_MINUTES=10`
+   - `CHECK_INTERVAL_MINUTES=1`
    - `GITHUB_TOKEN=<optional-github-pat>`
 
 4. **Verify Deployment**
    - Visit `/health` to confirm `{"status":"ok"}`.
-   - Open your configured `ADMIN_PATH` (default `/admin-mrs`), sign in with `ADMIN_PASSWORD`, and click **Check Now** to verify hub discovery and post generation.
+   - New posts generated from monitored site updates are stored directly in PostgreSQL and pushed in real time to visitors via `/api/posts/stream` with no GitHub commits or Render redeploys needed.

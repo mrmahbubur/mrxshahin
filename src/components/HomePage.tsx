@@ -48,38 +48,48 @@ export function HomePage({
     setPage(1);
   }, [initialSearch]);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(false);
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: '10',
-      });
-      if (selectedCategory !== 'all') params.set('category', selectedCategory);
-      if (activeSearch) params.set('search', activeSearch);
+  const loadData = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      if (!options.silent) {
+        setLoading(true);
+        setError(false);
+      }
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          limit: '10',
+        });
+        if (selectedCategory !== 'all') params.set('category', selectedCategory);
+        if (activeSearch) params.set('search', activeSearch);
 
-      const postsRes = await fetch(`/api/posts?${params.toString()}`);
-      if (!postsRes.ok) throw new Error('Failed to load');
+        const postsRes = await fetch(`/api/posts?${params.toString()}`);
+        if (!postsRes.ok) throw new Error('Failed to load');
 
-      const postsJson = (await postsRes.json()) as {
-        posts: PublicPostSummary[];
-        total: number;
-        page: number;
-        totalPages: number;
-        categories: CategoryCount[];
-      };
+        const postsJson = (await postsRes.json()) as {
+          posts: PublicPostSummary[];
+          total: number;
+          page: number;
+          totalPages: number;
+          categories: CategoryCount[];
+        };
 
-      setPosts(postsJson.posts);
-      setTotalPosts(postsJson.total);
-      setTotalPages(postsJson.totalPages);
-      setCategories(postsJson.categories || []);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, selectedCategory, activeSearch]);
+        setPosts(postsJson.posts);
+        setTotalPosts(postsJson.total);
+        setTotalPages(postsJson.totalPages);
+        setCategories(postsJson.categories || []);
+        setError(false);
+      } catch {
+        if (!options.silent) {
+          setError(true);
+        }
+      } finally {
+        if (!options.silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [page, selectedCategory, activeSearch]
+  );
 
   useEffect(() => {
     if (activeSearch) {
@@ -91,6 +101,66 @@ export function HomePage({
     }
     loadData();
   }, [loadData, activeSearch, selectedCategory]);
+
+  // Real-time live inclusion of newly published, edited, or removed posts via SSE
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') {
+      return;
+    }
+
+    let hasOpenedOnce = false;
+    const source = new EventSource('/api/posts/stream');
+
+    source.onopen = () => {
+      if (hasOpenedOnce) {
+        void loadData({ silent: true });
+      }
+      hasOpenedOnce = true;
+    };
+
+    const handlePublished = (ev: MessageEvent) => {
+      try {
+        const payload = JSON.parse(ev.data) as { post?: PublicPostSummary };
+        const incoming = payload.post;
+        if (incoming) {
+          const matchesCategory = selectedCategory === 'all' || incoming.category === selectedCategory;
+          if (matchesCategory && !activeSearch && page === 1) {
+            setPosts((prev) => {
+              if (prev.some((p) => p.id === incoming.id)) return prev;
+              return [incoming, ...prev].slice(0, 10);
+            });
+          }
+        }
+      } catch {
+        // ignore malformed SSE JSON
+      }
+      void loadData({ silent: true });
+    };
+
+    const handleUpdated = () => {
+      void loadData({ silent: true });
+    };
+
+    const handleDeleted = (ev: MessageEvent) => {
+      try {
+        const payload = JSON.parse(ev.data) as { id?: number };
+        if (typeof payload.id === 'number') {
+          setPosts((prev) => prev.filter((p) => p.id !== payload.id));
+        }
+      } catch {
+        // ignore malformed SSE JSON
+      }
+      void loadData({ silent: true });
+    };
+
+    source.addEventListener('post:published', handlePublished as EventListener);
+    source.addEventListener('post:updated', handleUpdated as EventListener);
+    source.addEventListener('post:deleted', handleDeleted as EventListener);
+
+    return () => {
+      source.close();
+    };
+  }, [loadData, selectedCategory, activeSearch, page]);
 
   // Debounce search input & sync URL query cleanly
   useEffect(() => {
@@ -148,7 +218,7 @@ export function HomePage({
           </p>
           <button
             type="button"
-            onClick={loadData}
+            onClick={() => void loadData()}
             className="inline-flex items-center gap-2 rounded-lg bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-xs font-medium text-white dark:text-zinc-900"
           >
             <RefreshCw className="h-3.5 w-3.5" />

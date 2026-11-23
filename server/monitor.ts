@@ -435,7 +435,8 @@ function buildChangeReport(
   if (!previous) {
     const wordCount = current.mainText.split(/\s+/).filter(Boolean).length;
     const hasSubstance =
-      wordCount >= 40 ||
+      wordCount >= 10 ||
+      (current.metaDescription.length >= 20 && current.title.length >= 4) ||
       current.headings.length >= 2 ||
       current.rssItems.length > 0 ||
       (current.githubData?.commits.length ?? 0) > 0 ||
@@ -696,14 +697,26 @@ export async function checkSingleSite(
     const signals = extractPageSignals(res.text, res.finalUrl);
 
     const origin = new URL(res.finalUrl).origin;
+    const hostLower = new URL(res.finalUrl).hostname.toLowerCase();
     const sitemapTarget = site.sitemapUrl || signals.discoveredSitemapUrl || `${origin}/sitemap.xml`;
-    const rssTarget = site.rssUrl || signals.discoveredRssUrl || `${origin}/rss.xml`;
+    const rssTarget =
+      site.rssUrl ||
+      signals.discoveredRssUrl ||
+      (hostLower.endsWith('.blogspot.com')
+        ? `${origin}/feeds/posts/default?alt=rss`
+        : hostLower.endsWith('.wordpress.com')
+          ? `${origin}/feed/`
+          : `${origin}/rss.xml`);
 
-    const [sitemapUrls, rssItems, githubData] = await Promise.all([
+    let [sitemapUrls, rssItems, githubData] = await Promise.all([
       fetchSitemapUrls(sitemapTarget),
       fetchRssItems(rssTarget),
       site.githubRepo ? fetchGithubActivity(site.githubRepo) : Promise.resolve(null),
     ]);
+
+    if (rssItems.length === 0 && !site.rssUrl && !signals.discoveredRssUrl && rssTarget.endsWith('/rss.xml')) {
+      rssItems = await fetchRssItems(`${origin}/feed/`);
+    }
 
     const contentHash = computeSnapshotHash({
       title: signals.title,
@@ -736,15 +749,12 @@ export async function checkSingleSite(
     const existingPostCount = await countPostsForSite(site.id);
     const report = buildChangeReport(site, previousSnapshot, currentSnapshotPayload, existingPostCount > 0);
 
-    // Save new snapshot only if initial or contentHash changed
-    if (!previousSnapshot || previousSnapshot.contentHash !== contentHash) {
-      await saveSnapshot(currentSnapshotPayload);
-    }
-
-    await updateSiteStatus(site.id, 'ok', null, signals.themeColor);
-
     const shouldPublish = options.forcePost || report.meaningful;
     if (!shouldPublish) {
+      if (!previousSnapshot || previousSnapshot.contentHash !== contentHash) {
+        await saveSnapshot(currentSnapshotPayload);
+      }
+      await updateSiteStatus(site.id, 'ok', null, signals.themeColor);
       await addLog({
         level: 'info',
         siteId: site.id,
@@ -758,6 +768,10 @@ export async function checkSingleSite(
     if (!options.forcePost) {
       const duplicate = await hasPostWithChangeHash(site.id, report.changeHash);
       if (duplicate) {
+        if (!previousSnapshot || previousSnapshot.contentHash !== contentHash) {
+          await saveSnapshot(currentSnapshotPayload);
+        }
+        await updateSiteStatus(site.id, 'ok', null, signals.themeColor);
         await addLog({
           level: 'info',
           siteId: site.id,
@@ -785,6 +799,10 @@ export async function checkSingleSite(
     });
 
     const post = await generateAndSavePostFromReport(report);
+    if (!previousSnapshot || previousSnapshot.contentHash !== contentHash) {
+      await saveSnapshot(currentSnapshotPayload);
+    }
+    await updateSiteStatus(site.id, 'ok', null, signals.themeColor);
     return {
       status: 'ok',
       changed: true,

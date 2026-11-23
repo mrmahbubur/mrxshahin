@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface ThumbnailImageProps {
   src: string;
@@ -18,6 +18,10 @@ export function ThumbnailImage({
   priority = false,
 }: ThumbnailImageProps) {
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
 
   if (failed || !src) {
     return (

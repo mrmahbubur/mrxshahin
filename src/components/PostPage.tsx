@@ -149,27 +149,53 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
     setError(null);
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
 
-    fetch(`/api/posts/${encodeURIComponent(slug)}`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error('Dispatch not found');
-        return res.json() as Promise<{ post: FullPost; related: PublicPostSummary[] }>;
-      })
-      .then((data) => {
-        if (cancelled) return;
-        setPost(data.post);
-        setRelated(data.related || []);
-        document.title = `${data.post.title} – M R S Auto Blog`;
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : 'Unable to load dispatch');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const fetchPost = (silent = false) => {
+      fetch(`/api/posts/${encodeURIComponent(slug)}`)
+        .then(async (res) => {
+          if (!res.ok) throw new Error('Dispatch not found');
+          return res.json() as Promise<{ post: FullPost; related: PublicPostSummary[] }>;
+        })
+        .then((data) => {
+          if (cancelled) return;
+          setPost(data.post);
+          setRelated(data.related || []);
+          setError(null);
+          document.title = `${data.post.title} – M R S Auto Blog`;
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err instanceof Error ? err.message : 'Unable to load dispatch');
+          if (silent) setPost(null);
+        })
+        .finally(() => {
+          if (!cancelled && !silent) setLoading(false);
+        });
+    };
+
+    fetchPost(false);
+
+    let source: EventSource | null = null;
+    if (typeof window !== 'undefined' && typeof EventSource !== 'undefined') {
+      source = new EventSource('/api/posts/stream');
+      const handleEvent = (ev: MessageEvent) => {
+        try {
+          const payload = JSON.parse(ev.data) as { slug?: string; post?: { slug?: string } };
+          const eventSlug = payload.slug || payload.post?.slug;
+          if (!eventSlug || eventSlug === slug) {
+            fetchPost(true);
+          }
+        } catch {
+          // ignore malformed SSE JSON
+        }
+      };
+      source.addEventListener('post:updated', handleEvent as EventListener);
+      source.addEventListener('post:deleted', handleEvent as EventListener);
+      source.addEventListener('post:published', () => fetchPost(true));
+    }
 
     return () => {
       cancelled = true;
+      source?.close();
     };
   }, [slug]);
 

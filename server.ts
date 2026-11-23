@@ -28,6 +28,11 @@ import {
   updatePost,
   updateSite,
 } from './server/db.ts';
+import {
+  emitPublicPostDeleted,
+  emitPublicPostUpdated,
+  subscribePublicPostEvents,
+} from './server/events.ts';
 import { regeneratePostContent, regeneratePostThumbnailOnly } from './server/generator.ts';
 import { checkSingleSite, isCheckRunning, runMonitoringCycle, syncHubSitesOnly } from './server/monitor.ts';
 import {
@@ -229,7 +234,7 @@ async function startServer(): Promise<void> {
       const cachePath = getThumbnailCachePath(safeSlug);
       if (fs.existsSync(cachePath)) {
         res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'public, max-age=86400');
+        res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
         res.sendFile(cachePath);
         return;
       }
@@ -244,7 +249,7 @@ async function startServer(): Promise<void> {
         record.data ?? (await buildFallbackThumbnailPng(record.title, record.siteName, safeSlug));
       saveThumbnailToDiskCache(safeSlug, pngBuffer);
       res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
       res.send(pngBuffer);
     } catch (err) {
       console.error('Thumbnail serve error:', err);
@@ -357,6 +362,38 @@ ${urlsXml}
     } catch {
       res.status(500).json({ error: 'Failed to load posts' });
     }
+  });
+
+  // Real-time Server-Sent Events stream for newly published/updated public posts only
+  app.get('/api/posts/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+    res.write(': connected\n\n');
+
+    const unsubscribe = subscribePublicPostEvents((event) => {
+      try {
+        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      } catch {
+        // ignore broken pipe; cleanup fires on close
+      }
+    });
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        clearInterval(heartbeat);
+        unsubscribe();
+      }
+    }, 25000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
   });
 
   app.get('/api/posts/:slug', async (req, res) => {
@@ -706,6 +743,9 @@ ${urlsXml}
       }
 
       const updated = await updatePost(id, patch);
+      if (updated) {
+        emitPublicPostUpdated(updated);
+      }
       res.json({ post: updated });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to update post' });
@@ -735,11 +775,13 @@ ${urlsXml}
   app.delete('/api/admin/posts/:id', requireAdmin, async (req, res) => {
     try {
       const id = Number(req.params.id);
+      const existing = await getPostById(id);
       const ok = await deletePost(id);
       if (!ok) {
         res.status(404).json({ error: 'Post not found' });
         return;
       }
+      emitPublicPostDeleted(id, existing?.slug);
       res.json({ deleted: true });
     } catch {
       res.status(500).json({ error: 'Failed to delete post' });
@@ -814,33 +856,40 @@ ${urlsXml}
     });
   }
 
-  // ---------------- Scheduler ----------------
+  // ---------------- Real-Time Monitoring Scheduler ----------------
 
-  const rawInterval = Number(process.env.CHECK_INTERVAL_MINUTES || 10);
-  const intervalMinutes = Number.isFinite(rawInterval) && rawInterval >= 1 ? Math.floor(rawInterval) : 10;
-  const cronExpr = intervalMinutes < 60 ? `*/${intervalMinutes} * * * *` : '0 * * * *';
+  const rawSeconds = Number(process.env.CHECK_INTERVAL_SECONDS || 0);
+  const useSeconds = Number.isFinite(rawSeconds) && rawSeconds >= 15;
+  const rawMinutes = Number(process.env.CHECK_INTERVAL_MINUTES || 1);
+  const intervalMinutes = Number.isFinite(rawMinutes) && rawMinutes >= 1 ? Math.floor(rawMinutes) : 1;
 
-  cron.schedule(cronExpr, () => {
-    runMonitoringCycle('scheduler').catch((err) => {
-      console.error('Scheduled monitoring error:', err);
+  if (useSeconds) {
+    const intervalSec = Math.floor(rawSeconds);
+    setInterval(() => {
+      runMonitoringCycle('scheduler').catch((err) => {
+        console.error('Scheduled monitoring error:', err);
+      });
+    }, intervalSec * 1000);
+  } else {
+    const cronExpr = intervalMinutes === 1 ? '* * * * *' : intervalMinutes < 60 ? `*/${intervalMinutes} * * * *` : '0 * * * *';
+    cron.schedule(cronExpr, () => {
+      runMonitoringCycle('scheduler').catch((err) => {
+        console.error('Scheduled monitoring error:', err);
+      });
     });
-  });
+  }
+
+  const cadenceLabel = useSeconds ? `${Math.floor(rawSeconds)}s` : `${intervalMinutes}m`;
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`M R S Auto Blog listening on http://0.0.0.0:${PORT} (DB: ${getDbEngine()}, interval: ${intervalMinutes}m)`);
+    console.log(`M R S Auto Blog listening on http://0.0.0.0:${PORT} (DB: ${getDbEngine()}, interval: ${cadenceLabel})`);
 
-    // On first launch with empty sites list, perform non-blocking initial hub sync & check
-    listSites()
-      .then((sites) => {
-        if (sites.length === 0) {
-          setTimeout(() => {
-            runMonitoringCycle('startup').catch((err) => {
-              console.error('Initial startup monitoring error:', err);
-            });
-          }, 2000);
-        }
-      })
-      .catch(() => {});
+    // Run non-blocking hub sync & monitoring cycle on startup so updates/retries publish immediately without redeploy
+    setTimeout(() => {
+      runMonitoringCycle('startup').catch((err) => {
+        console.error('Initial startup monitoring error:', err);
+      });
+    }, 2000);
   });
 }
 
