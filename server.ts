@@ -51,9 +51,11 @@ function resolveAdminPath(): string {
   const raw = (process.env.ADMIN_PATH || '/admin-mrs').trim();
   const withSlash = raw.startsWith('/') ? raw : `/${raw}`;
   const normalized = withSlash.replace(/\/+$/, '');
+  const validFormat = /^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(normalized);
   if (
-    !normalized ||
+    !validFormat ||
     normalized === '/' ||
+    normalized === '/health' ||
     normalized.startsWith('/api') ||
     normalized.startsWith('/post') ||
     normalized.startsWith('/category') ||
@@ -72,12 +74,17 @@ function isAdminHtmlRequest(reqPath: string): boolean {
 }
 
 function injectAdminRouteIntoHtml(html: string): string {
+  const safePathJson = JSON.stringify(ADMIN_PATH).replace(/</g, '\\u003c');
   const adminMeta = `
+    <title>Admin Console – M R S Auto Blog</title>
     <meta name="robots" content="noindex, nofollow" />
-    <script>window.__MRS_ADMIN_PATH__ = ${JSON.stringify(ADMIN_PATH)};</script>
+    <script>window.__MRS_ADMIN_PATH__ = ${safePathJson};</script>
   `;
   return html
-    .replace(/<title>[\s\S]*?<\/title>/i, '<title>Admin Console – M R S Auto Blog</title>')
+    .replace(/<title>[\s\S]*?<\/title>/i, '')
+    .replace(/<meta\s+name="description"[\s\S]*?\/>/i, '')
+    .replace(/<meta\s+property="og:[^"]*"[\s\S]*?\/>/gi, '')
+    .replace(/<meta\s+name="twitter:[^"]*"[\s\S]*?\/>/gi, '')
     .replace('</head>', `${adminMeta}\n  </head>`);
 }
 
