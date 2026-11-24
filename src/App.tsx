@@ -42,14 +42,38 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const navigate = useCallback((nextPath: string) => {
-    const currentFull = window.location.pathname + window.location.search;
-    if (nextPath !== currentFull) {
-      window.history.pushState({}, '', nextPath);
-    }
-    setLocationState(getLocationPathWithQuery());
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const scrollToHashTarget = useCallback((hashId: string) => {
+    const attemptScroll = (remaining: number) => {
+      const target = document.getElementById(hashId);
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      if (remaining > 0) {
+        setTimeout(() => attemptScroll(remaining - 1), 60);
+      }
+    };
+    requestAnimationFrame(() => attemptScroll(5));
   }, []);
+
+  const navigate = useCallback(
+    (nextPath: string) => {
+      const [pathAndQuery, rawHash] = nextPath.split('#');
+      const targetFull = pathAndQuery || '/';
+      const currentFull = window.location.pathname + window.location.search;
+      if (targetFull !== currentFull) {
+        window.history.pushState({}, '', targetFull);
+      }
+      setLocationState(getLocationPathWithQuery());
+
+      if (rawHash) {
+        scrollToHashTarget(rawHash);
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+    [scrollToHashTarget]
+  );
 
   const { pathname, searchQuery } = locationState;
   const serverAdminPath =
@@ -97,15 +121,15 @@ export default function App() {
       </div>
 
       <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14]">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-12 grid grid-cols-1 md:grid-cols-12 gap-8 items-start text-sm text-zinc-600 dark:text-zinc-400">
-          <div className="md:col-span-6 space-y-2.5">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-8 items-start text-sm text-zinc-600 dark:text-zinc-400">
+          <div className="sm:col-span-2 md:col-span-6 space-y-2.5">
             <p className="font-display text-base font-semibold text-zinc-900 dark:text-zinc-100">
               M R S Auto Blog
             </p>
-            <p className="max-w-md text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+            <p className="max-w-md text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
               Independent editorial coverage documenting verified software releases, live web platform capabilities, and technical troubleshooting guides as updates go live.
             </p>
-            <p className="pt-1 text-xs text-zinc-500 dark:text-zinc-500">
+            <p className="pt-1 text-xs text-zinc-500 dark:text-zinc-400">
               © {new Date().getFullYear()} M R S Auto Blog. All dispatches verified from live sources.
             </p>
           </div>
@@ -130,14 +154,7 @@ export default function App() {
                   href="/#labels"
                   onClick={(e) => {
                     e.preventDefault();
-                    if (pathname !== '/') {
-                      navigate('/');
-                      setTimeout(() => {
-                        document.getElementById('labels')?.scrollIntoView({ behavior: 'smooth' });
-                      }, 80);
-                    } else {
-                      document.getElementById('labels')?.scrollIntoView({ behavior: 'smooth' });
-                    }
+                    navigate('/#labels');
                   }}
                   className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
                 >
@@ -149,14 +166,7 @@ export default function App() {
                   href="/#archive"
                   onClick={(e) => {
                     e.preventDefault();
-                    if (pathname !== '/') {
-                      navigate('/');
-                      setTimeout(() => {
-                        document.getElementById('archive')?.scrollIntoView({ behavior: 'smooth' });
-                      }, 80);
-                    } else {
-                      document.getElementById('archive')?.scrollIntoView({ behavior: 'smooth' });
-                    }
+                    navigate('/#archive');
                   }}
                   className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
                 >

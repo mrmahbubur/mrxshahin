@@ -175,11 +175,15 @@ async function fetchSafeSourceImageBuffer(rawUrl: string): Promise<Buffer | null
     const valid = validateExternalUrl(rawUrl);
     const res = await fetch(valid.toString(), {
       method: 'GET',
+      cache: 'no-store',
       redirect: 'follow',
       signal: AbortSignal.timeout(6000),
       headers: {
         'User-Agent': 'MRSAutoBlogBot/1.0',
         Accept: 'image/png,image/jpeg,image/webp,image/*;q=0.8',
+        'Cache-Control': 'no-cache, no-store, max-age=0',
+        Pragma: 'no-cache',
+        Expires: '0',
       },
     });
     if (!res.ok) return null;

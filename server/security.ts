@@ -124,6 +124,43 @@ export function validateExternalUrl(rawUrl: string): URL {
   return parsed;
 }
 
+const TRACKING_QUERY_PARAMS = [
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'utm_id',
+  'ref',
+  'fbclid',
+  'gclid',
+];
+
+export function normalizeExternalUrl(rawUrl: string): string {
+  const parsed = validateExternalUrl(rawUrl);
+  parsed.hash = '';
+  for (const param of TRACKING_QUERY_PARAMS) {
+    parsed.searchParams.delete(param);
+  }
+  parsed.pathname = parsed.pathname.replace(/\/{2,}/g, '/');
+  if (parsed.pathname.length > 1 && parsed.pathname.endsWith('/')) {
+    parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+  }
+  parsed.searchParams.sort();
+  const str = parsed.toString();
+  return str.endsWith('/') && parsed.pathname === '/' ? str.slice(0, -1) : str;
+}
+
+function stripInternalCacheBuster(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.searchParams.delete('_cb');
+    return parsed.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 export async function safeFetchText(
   rawUrl: string,
   options: {
@@ -144,7 +181,7 @@ export async function safeFetchText(
       const validated = validateExternalUrl(rawUrl);
       const fetchTarget = new URL(validated.toString());
       if (options.cacheBust) {
-        fetchTarget.searchParams.set('_cb', String(Date.now()));
+        fetchTarget.searchParams.set('_cb', `${Date.now()}-${attempt}`);
       }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -159,7 +196,7 @@ export async function safeFetchText(
             'User-Agent':
               'Mozilla/5.0 (compatible; MRSAutoBlogBot/1.0; +https://mrxshahin.ai.studio)',
             Accept: 'text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8',
-            'Cache-Control': 'no-cache, no-store, max-age=0',
+            'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
             Pragma: 'no-cache',
             Expires: '0',
             ...(options.headers ?? {}),
@@ -180,12 +217,14 @@ export async function safeFetchText(
           throw new Error(`Response exceeded max size (${maxBytes} bytes)`);
         }
 
+        const cleanFinalUrl = stripInternalCacheBuster(res.url || validated.toString());
+
         const reader = res.body?.getReader();
         if (!reader) {
           const text = await res.text();
           return {
             text: text.slice(0, maxBytes),
-            finalUrl: res.url || validated.toString(),
+            finalUrl: cleanFinalUrl,
             status: res.status,
             contentType: res.headers.get('content-type') || '',
           };
@@ -209,7 +248,7 @@ export async function safeFetchText(
         const buffer = Buffer.concat(chunks);
         return {
           text: buffer.toString('utf8'),
-          finalUrl: res.url || validated.toString(),
+          finalUrl: cleanFinalUrl,
           status: res.status,
           contentType: res.headers.get('content-type') || '',
         };

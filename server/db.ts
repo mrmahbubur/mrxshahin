@@ -3,6 +3,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { getDatabaseUrl } from './env.ts';
+import { normalizeExternalUrl } from './security.ts';
 import type {
   ChangeReport,
   DbEngine,
@@ -479,9 +480,10 @@ export async function upsertHubSite(input: {
   url: string;
   githubRepo?: string | null;
 }): Promise<{ site: SiteRecord; created: boolean }> {
+  const normalizedUrl = normalizeExternalUrl(input.url);
   const createdAt = nowIso();
   if (pgPool) {
-    const existing = await pgPool.query('SELECT * FROM sites WHERE url = $1', [input.url]);
+    const existing = await pgPool.query('SELECT * FROM sites WHERE url = $1', [normalizedUrl]);
     if (existing.rows[0]) {
       const updated = await pgPool.query(
         'UPDATE sites SET name = COALESCE(NULLIF($1, \'\'), name), github_repo = COALESCE($2, github_repo) WHERE id = $3 RETURNING *',
@@ -492,12 +494,12 @@ export async function upsertHubSite(input: {
     const inserted = await pgPool.query(
       `INSERT INTO sites (name, url, github_repo, source, active, last_status, created_at)
        VALUES ($1, $2, $3, 'hub', TRUE, 'pending', $4) RETURNING *`,
-      [input.name, input.url, input.githubRepo ?? null, createdAt]
+      [input.name, normalizedUrl, input.githubRepo ?? null, createdAt]
     );
     return { site: mapSiteRow(inserted.rows[0]), created: true };
   }
 
-  const existing = sqliteDb!.prepare('SELECT * FROM sites WHERE url = ?').get(input.url) as Record<string, unknown> | undefined;
+  const existing = sqliteDb!.prepare('SELECT * FROM sites WHERE url = ?').get(normalizedUrl) as Record<string, unknown> | undefined;
   if (existing) {
     sqliteDb!
       .prepare("UPDATE sites SET name = COALESCE(NULLIF(?, ''), name), github_repo = COALESCE(?, github_repo) WHERE id = ?")
@@ -509,7 +511,7 @@ export async function upsertHubSite(input: {
     .prepare(
       "INSERT INTO sites (name, url, github_repo, source, active, last_status, created_at) VALUES (?, ?, ?, 'hub', 1, 'pending', ?)"
     )
-    .run(input.name, input.url, input.githubRepo ?? null, createdAt);
+    .run(input.name, normalizedUrl, input.githubRepo ?? null, createdAt);
   const created = sqliteDb!.prepare('SELECT * FROM sites WHERE id = ?').get(info.lastInsertRowid) as Record<string, unknown>;
   return { site: mapSiteRow(created), created: true };
 }
@@ -521,13 +523,14 @@ export async function createManualSite(input: {
   sitemapUrl?: string | null;
   githubRepo?: string | null;
 }): Promise<SiteRecord> {
+  const normalizedUrl = normalizeExternalUrl(input.url);
   const createdAt = nowIso();
   if (pgPool) {
     const res = await pgPool.query(
       `INSERT INTO sites (name, url, rss_url, sitemap_url, github_repo, source, active, last_status, created_at)
        VALUES ($1, $2, $3, $4, $5, 'manual', TRUE, 'pending', $6)
        RETURNING *`,
-      [input.name, input.url, input.rssUrl ?? null, input.sitemapUrl ?? null, input.githubRepo ?? null, createdAt]
+      [input.name, normalizedUrl, input.rssUrl ?? null, input.sitemapUrl ?? null, input.githubRepo ?? null, createdAt]
     );
     return mapSiteRow(res.rows[0]);
   }
@@ -536,7 +539,7 @@ export async function createManualSite(input: {
       `INSERT INTO sites (name, url, rss_url, sitemap_url, github_repo, source, active, last_status, created_at)
        VALUES (?, ?, ?, ?, ?, 'manual', 1, 'pending', ?)`
     )
-    .run(input.name, input.url, input.rssUrl ?? null, input.sitemapUrl ?? null, input.githubRepo ?? null, createdAt);
+    .run(input.name, normalizedUrl, input.rssUrl ?? null, input.sitemapUrl ?? null, input.githubRepo ?? null, createdAt);
   const row = sqliteDb!.prepare('SELECT * FROM sites WHERE id = ?').get(info.lastInsertRowid) as Record<string, unknown>;
   return mapSiteRow(row);
 }
@@ -557,7 +560,7 @@ export async function updateSite(
 
   const next = {
     name: patch.name ?? current.name,
-    url: patch.url ?? current.url,
+    url: patch.url ? normalizeExternalUrl(patch.url) : current.url,
     rssUrl: patch.rssUrl !== undefined ? patch.rssUrl : current.rssUrl,
     sitemapUrl: patch.sitemapUrl !== undefined ? patch.sitemapUrl : current.sitemapUrl,
     githubRepo: patch.githubRepo !== undefined ? patch.githubRepo : current.githubRepo,

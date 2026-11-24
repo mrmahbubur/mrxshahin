@@ -46,6 +46,7 @@ import { checkSingleSite, isCheckRunning, runMonitoringCycle, syncHubSitesOnly }
 import {
   escapeXml,
   hashPassword,
+  normalizeExternalUrl,
   sanitizePostHtml,
   signSessionToken,
   slugify,
@@ -206,8 +207,16 @@ async function startServer(): Promise<void> {
 
   const activeSseClients = new Set<express.Response>();
 
+  function setStrictNoCacheHeaders(res: express.Response): void {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('Surrogate-Control', 'no-store');
+  }
+
   // Health Check (minimal response with no internal details)
   app.get('/health', (_req, res) => {
+    setStrictNoCacheHeaders(res);
     res.json({ status: 'ok' });
   });
 
@@ -215,6 +224,7 @@ async function startServer(): Promise<void> {
   app.get('/robots.txt', (req, res) => {
     const baseUrl = resolveBaseUrl(req);
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    setStrictNoCacheHeaders(res);
     res.send(
       `User-agent: *\nDisallow: ${ADMIN_PATH}\nDisallow: /api/admin\nSitemap: ${baseUrl}/sitemap.xml\n`
     );
@@ -302,7 +312,7 @@ ${itemsXml}
 </rss>`;
 
       res.setHeader('Content-Type', 'application/rss+xml; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+      setStrictNoCacheHeaders(res);
       res.send(xml);
     } catch (err) {
       res.status(500).send('Error generating RSS feed');
@@ -328,18 +338,16 @@ ${urlsXml}
 </urlset>`;
 
       res.setHeader('Content-Type', 'application/xml; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+      setStrictNoCacheHeaders(res);
       res.send(xml);
     } catch {
       res.status(500).send('Error generating sitemap');
     }
   });
 
-  // Enforce no-store caching across all dynamic public and admin API endpoints
+  // Enforce strict no-store caching across all dynamic public and admin API endpoints
   app.use('/api', (_req, res, next) => {
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
+    setStrictNoCacheHeaders(res);
     next();
   });
 
@@ -653,7 +661,7 @@ ${urlsXml}
         return;
       }
 
-      const validUrl = validateExternalUrl(rawUrl).toString().replace(/\/+$/, '');
+      const validUrl = normalizeExternalUrl(rawUrl);
       const validRss = rawRss ? validateExternalUrl(rawRss).toString() : null;
       const validSitemap = rawSitemap ? validateExternalUrl(rawSitemap).toString() : null;
 
@@ -689,7 +697,7 @@ ${urlsXml}
 
       const patch: Record<string, unknown> = {};
       if (typeof req.body?.name === 'string') patch.name = req.body.name.trim();
-      if (typeof req.body?.url === 'string') patch.url = validateExternalUrl(req.body.url).toString().replace(/\/+$/, '');
+      if (typeof req.body?.url === 'string') patch.url = normalizeExternalUrl(req.body.url);
       if (req.body?.rssUrl !== undefined) {
         patch.rssUrl = req.body.rssUrl ? validateExternalUrl(String(req.body.rssUrl)).toString() : null;
       }

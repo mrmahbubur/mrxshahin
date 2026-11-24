@@ -1,5 +1,5 @@
 import { Menu, Moon, Sun, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface HeaderProps {
   currentPath: string;
@@ -11,6 +11,17 @@ interface HeaderProps {
 export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: HeaderProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        setMobileOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileOpen]);
+
   const handleLinkClick = (e: React.MouseEvent<HTMLAnchorElement>, path: string) => {
     if (path.startsWith('/rss.xml')) {
       setMobileOpen(false);
@@ -18,18 +29,6 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
     }
     e.preventDefault();
     setMobileOpen(false);
-    if (path.startsWith('/#')) {
-      const targetId = path.slice(2);
-      if (currentPath !== '/') {
-        onNavigate('/');
-        setTimeout(() => {
-          document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth' });
-        }, 80);
-      } else {
-        document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth' });
-      }
-      return;
-    }
     onNavigate(path);
   };
 
@@ -116,6 +115,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             onClick={() => setMobileOpen((v) => !v)}
             aria-label="Toggle navigation menu"
             aria-expanded={mobileOpen}
+            aria-controls="mobile-nav"
             className="md:hidden inline-flex items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-800 p-2 text-zinc-700 dark:text-zinc-300 min-h-[40px] min-w-[40px]"
           >
             {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
@@ -124,7 +124,11 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
       </div>
 
       {mobileOpen && (
-        <nav aria-label="Mobile navigation" className="md:hidden border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-4 py-3 flex flex-col gap-1">
+        <nav
+          id="mobile-nav"
+          aria-label="Mobile navigation"
+          className="md:hidden border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-4 py-3 flex flex-col gap-1"
+        >
           <a
             href="/"
             aria-current={isHomeActive ? 'page' : undefined}

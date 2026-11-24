@@ -15,7 +15,7 @@ import {
 } from './db.ts';
 import { getGithubToken } from './env.ts';
 import { generateAndSavePostFromReport } from './generator.ts';
-import { safeFetchText, validateExternalUrl } from './security.ts';
+import { normalizeExternalUrl, safeFetchText, validateExternalUrl } from './security.ts';
 import type {
   ChangeReport,
   GithubActivity,
@@ -61,19 +61,7 @@ export function isCheckRunning(): boolean {
   return checkInProgress;
 }
 
-function normalizeUrl(raw: string): string {
-  const parsed = validateExternalUrl(raw);
-  parsed.hash = '';
-  // Remove common tracking query params
-  for (const param of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref']) {
-    parsed.searchParams.delete(param);
-  }
-  if (parsed.pathname.length > 1 && parsed.pathname.endsWith('/')) {
-    parsed.pathname = parsed.pathname.replace(/\/+$/, '');
-  }
-  const str = parsed.toString();
-  return str.endsWith('/') && parsed.pathname === '/' ? str.slice(0, -1) : str;
-}
+const normalizeUrl = normalizeExternalUrl;
 
 const UPPERCASE_SITE_TOKENS = new Set([
   'ai',
@@ -829,7 +817,7 @@ export async function syncHubSitesOnly(): Promise<{ discovered: number; added: n
   const hubHost = new URL(hubUrl).hostname.toLowerCase();
 
   try {
-    const res = await safeFetchText(hubUrl, { timeoutMs: 14000, retries: 2 });
+    const res = await safeFetchText(hubUrl, { timeoutMs: 14000, retries: 2, cacheBust: true });
     const $ = cheerio.load(res.text);
     const seenUrls = new Set<string>();
     const candidates: Array<{ name: string; url: string; githubRepo: string | null }> = [];
