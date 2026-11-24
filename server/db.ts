@@ -524,13 +524,15 @@ export async function createManualSite(input: {
   githubRepo?: string | null;
 }): Promise<SiteRecord> {
   const normalizedUrl = normalizeExternalUrl(input.url);
+  const normalizedRss = input.rssUrl ? normalizeExternalUrl(input.rssUrl) : null;
+  const normalizedSitemap = input.sitemapUrl ? normalizeExternalUrl(input.sitemapUrl) : null;
   const createdAt = nowIso();
   if (pgPool) {
     const res = await pgPool.query(
       `INSERT INTO sites (name, url, rss_url, sitemap_url, github_repo, source, active, last_status, created_at)
        VALUES ($1, $2, $3, $4, $5, 'manual', TRUE, 'pending', $6)
        RETURNING *`,
-      [input.name, normalizedUrl, input.rssUrl ?? null, input.sitemapUrl ?? null, input.githubRepo ?? null, createdAt]
+      [input.name, normalizedUrl, normalizedRss, normalizedSitemap, input.githubRepo ?? null, createdAt]
     );
     return mapSiteRow(res.rows[0]);
   }
@@ -539,7 +541,7 @@ export async function createManualSite(input: {
       `INSERT INTO sites (name, url, rss_url, sitemap_url, github_repo, source, active, last_status, created_at)
        VALUES (?, ?, ?, ?, ?, 'manual', 1, 'pending', ?)`
     )
-    .run(input.name, normalizedUrl, input.rssUrl ?? null, input.sitemapUrl ?? null, input.githubRepo ?? null, createdAt);
+    .run(input.name, normalizedUrl, normalizedRss, normalizedSitemap, input.githubRepo ?? null, createdAt);
   const row = sqliteDb!.prepare('SELECT * FROM sites WHERE id = ?').get(info.lastInsertRowid) as Record<string, unknown>;
   return mapSiteRow(row);
 }
@@ -561,8 +563,13 @@ export async function updateSite(
   const next = {
     name: patch.name ?? current.name,
     url: patch.url ? normalizeExternalUrl(patch.url) : current.url,
-    rssUrl: patch.rssUrl !== undefined ? patch.rssUrl : current.rssUrl,
-    sitemapUrl: patch.sitemapUrl !== undefined ? patch.sitemapUrl : current.sitemapUrl,
+    rssUrl: patch.rssUrl !== undefined ? (patch.rssUrl ? normalizeExternalUrl(patch.rssUrl) : null) : current.rssUrl,
+    sitemapUrl:
+      patch.sitemapUrl !== undefined
+        ? patch.sitemapUrl
+          ? normalizeExternalUrl(patch.sitemapUrl)
+          : null
+        : current.sitemapUrl,
     githubRepo: patch.githubRepo !== undefined ? patch.githubRepo : current.githubRepo,
     active: patch.active !== undefined ? patch.active : current.active,
   };

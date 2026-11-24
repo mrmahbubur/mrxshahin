@@ -662,8 +662,8 @@ ${urlsXml}
       }
 
       const validUrl = normalizeExternalUrl(rawUrl);
-      const validRss = rawRss ? validateExternalUrl(rawRss).toString() : null;
-      const validSitemap = rawSitemap ? validateExternalUrl(rawSitemap).toString() : null;
+      const validRss = rawRss ? normalizeExternalUrl(rawRss) : null;
+      const validSitemap = rawSitemap ? normalizeExternalUrl(rawSitemap) : null;
 
       const site = await createManualSite({
         name,
@@ -699,10 +699,10 @@ ${urlsXml}
       if (typeof req.body?.name === 'string') patch.name = req.body.name.trim();
       if (typeof req.body?.url === 'string') patch.url = normalizeExternalUrl(req.body.url);
       if (req.body?.rssUrl !== undefined) {
-        patch.rssUrl = req.body.rssUrl ? validateExternalUrl(String(req.body.rssUrl)).toString() : null;
+        patch.rssUrl = req.body.rssUrl ? normalizeExternalUrl(String(req.body.rssUrl)) : null;
       }
       if (req.body?.sitemapUrl !== undefined) {
-        patch.sitemapUrl = req.body.sitemapUrl ? validateExternalUrl(String(req.body.sitemapUrl)).toString() : null;
+        patch.sitemapUrl = req.body.sitemapUrl ? normalizeExternalUrl(String(req.body.sitemapUrl)) : null;
       }
       if (req.body?.githubRepo !== undefined) {
         patch.githubRepo = req.body.githubRepo ? String(req.body.githubRepo).trim() : null;

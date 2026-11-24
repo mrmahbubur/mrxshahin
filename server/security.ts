@@ -134,6 +134,10 @@ const TRACKING_QUERY_PARAMS = [
   'ref',
   'fbclid',
   'gclid',
+  'mc_cid',
+  'mc_eid',
+  'igshid',
+  '_cb',
 ];
 
 export function normalizeExternalUrl(rawUrl: string): string {
@@ -174,13 +178,14 @@ export async function safeFetchText(
   const timeoutMs = options.timeoutMs ?? 12000;
   const maxBytes = options.maxBytes ?? 2 * 1024 * 1024;
   const retries = options.retries ?? 2;
+  const cacheBust = options.cacheBust ?? true;
 
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const validated = validateExternalUrl(rawUrl);
       const fetchTarget = new URL(validated.toString());
-      if (options.cacheBust) {
+      if (cacheBust) {
         fetchTarget.searchParams.set('_cb', `${Date.now()}-${attempt}`);
       }
       const controller = new AbortController();

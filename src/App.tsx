@@ -34,17 +34,11 @@ export default function App() {
     }
   }, [darkMode]);
 
-  useEffect(() => {
-    const onPopState = () => {
-      setLocationState(getLocationPathWithQuery());
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, []);
-
   const scrollToHashTarget = useCallback((hashId: string) => {
+    const cleanId = hashId.replace(/^#/, '').trim();
+    if (!cleanId) return;
     const attemptScroll = (remaining: number) => {
-      const target = document.getElementById(hashId);
+      const target = document.getElementById(cleanId);
       if (target) {
         target.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
@@ -56,13 +50,28 @@ export default function App() {
     requestAnimationFrame(() => attemptScroll(5));
   }, []);
 
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.hash) {
+      scrollToHashTarget(window.location.hash);
+    }
+    const onPopState = () => {
+      setLocationState(getLocationPathWithQuery());
+      if (window.location.hash) {
+        scrollToHashTarget(window.location.hash);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [scrollToHashTarget]);
+
   const navigate = useCallback(
     (nextPath: string) => {
       const [pathAndQuery, rawHash] = nextPath.split('#');
       const targetFull = pathAndQuery || '/';
-      const currentFull = window.location.pathname + window.location.search;
-      if (targetFull !== currentFull) {
-        window.history.pushState({}, '', targetFull);
+      const nextUrlWithHash = rawHash ? `${targetFull}#${rawHash}` : targetFull;
+      const currentFull = window.location.pathname + window.location.search + window.location.hash;
+      if (nextUrlWithHash !== currentFull) {
+        window.history.pushState({}, '', nextUrlWithHash);
       }
       setLocationState(getLocationPathWithQuery());
 
