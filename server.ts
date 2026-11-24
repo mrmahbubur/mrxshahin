@@ -7,6 +7,7 @@ import cron from 'node-cron';
 import {
   addLog,
   claimAdminPasswordHashAtomic,
+  closeDb,
   createManualSite,
   deletePost,
   deleteSite,
@@ -52,11 +53,36 @@ import {
 } from './server/security.ts';
 import { buildFallbackThumbnailPng, getThumbnailCachePath, saveThumbnailToDiskCache } from './server/thumbnails.ts';
 
-const PORT = Number(process.env.PORT || 3000);
-const HAS_BUILT_DIST = fs.existsSync(path.resolve(process.cwd(), 'dist', 'index.html'));
-const IS_TSX_RUNTIME =
-  process.execArgv.some((arg) => arg.includes('tsx')) || process.env.npm_lifecycle_event === 'dev';
-const IS_PROD = process.env.NODE_ENV === 'production' || (HAS_BUILT_DIST && !IS_TSX_RUNTIME);
+function resolveRuntimeEnvironment(): {
+  port: number;
+  isProd: boolean;
+  hasBuiltDist: boolean;
+  distDir: string;
+} {
+  const rawPort = Number(process.env.PORT || 3000);
+  const port = Number.isFinite(rawPort) && rawPort > 0 ? rawPort : 3000;
+  const distDir = path.resolve(process.cwd(), 'dist');
+  const hasBuiltDist = fs.existsSync(path.join(distDir, 'index.html'));
+  const nodeEnv = (process.env.NODE_ENV || '').trim().toLowerCase();
+  const isRender = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+  const isTsxRuntime =
+    process.execArgv.some((arg) => arg.includes('tsx')) || process.env.npm_lifecycle_event === 'dev';
+
+  let isProd: boolean;
+  if (nodeEnv === 'production') {
+    isProd = true;
+  } else if (nodeEnv === 'development' || nodeEnv === 'test') {
+    isProd = false;
+  } else {
+    isProd = isRender || (hasBuiltDist && !isTsxRuntime);
+  }
+
+  return { port, isProd, hasBuiltDist, distDir };
+}
+
+const RUNTIME = resolveRuntimeEnvironment();
+const PORT = RUNTIME.port;
+const IS_PROD = RUNTIME.isProd;
 
 const RESERVED_ROUTE_PREFIXES = [
   '/api',
@@ -126,7 +152,10 @@ function injectAdminRouteIntoHtml(html: string): string {
 }
 
 function resolveBaseUrl(req: express.Request): string {
-  const configured = process.env.SITE_URL?.trim() || process.env.APP_URL?.trim();
+  const configured =
+    process.env.SITE_URL?.trim() ||
+    process.env.RENDER_EXTERNAL_URL?.trim() ||
+    process.env.APP_URL?.trim();
   if (configured) {
     return configured.replace(/\/+$/, '');
   }
@@ -232,8 +261,11 @@ async function startServer(): Promise<void> {
   const dbEngine = await initDb();
   await backfillMissingThumbnails();
   const app = express();
+  app.disable('x-powered-by');
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '1mb' }));
+
+  const activeSseClients = new Set<express.Response>();
 
   // Health Check (minimal response with no internal details)
   app.get('/health', (_req, res) => {
@@ -412,6 +444,7 @@ ${urlsXml}
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
     res.write(': connected\n\n');
+    activeSseClients.add(res);
 
     const unsubscribe = subscribePublicPostEvents((event) => {
       try {
@@ -427,12 +460,14 @@ ${urlsXml}
       } catch {
         clearInterval(heartbeat);
         unsubscribe();
+        activeSseClients.delete(res);
       }
     }, 25000);
 
     req.on('close', () => {
       clearInterval(heartbeat);
       unsubscribe();
+      activeSseClients.delete(res);
     });
   });
 
@@ -868,7 +903,17 @@ ${urlsXml}
       }
     });
   } else {
-    const distDir = path.resolve(process.cwd(), 'dist');
+    const distDir = RUNTIME.distDir;
+    if (!RUNTIME.hasBuiltDist) {
+      console.warn('Production mode active, but dist/index.html was not found. Run "npm run build" before starting.');
+    }
+    app.use(
+      '/assets',
+      express.static(path.join(distDir, 'assets'), {
+        immutable: true,
+        maxAge: '1y',
+      })
+    );
     app.use(express.static(distDir, { index: false }));
 
     app.get('*', async (req, res) => {
@@ -889,7 +934,13 @@ ${urlsXml}
           }
         }
 
-        res.status(200).set({ 'Content-Type': 'text/html' }).send(html);
+        res
+          .status(200)
+          .set({
+            'Content-Type': 'text/html',
+            'Cache-Control': 'no-cache',
+          })
+          .send(html);
       } catch {
         res.status(500).send('Frontend build not found. Run npm run build first.');
       }
@@ -903,16 +954,20 @@ ${urlsXml}
   const rawMinutes = Number(process.env.CHECK_INTERVAL_MINUTES || 1);
   const intervalMinutes = Number.isFinite(rawMinutes) && rawMinutes >= 1 ? Math.floor(rawMinutes) : 1;
 
+  let intervalHandle: ReturnType<typeof setInterval> | null = null;
+  let cronTask: ReturnType<typeof cron.schedule> | null = null;
+  let startupTimer: ReturnType<typeof setTimeout> | null = null;
+
   if (useSeconds) {
     const intervalSec = Math.floor(rawSeconds);
-    setInterval(() => {
+    intervalHandle = setInterval(() => {
       runMonitoringCycle('scheduler').catch((err) => {
         console.error('Scheduled monitoring error:', err);
       });
     }, intervalSec * 1000);
   } else {
     const cronExpr = intervalMinutes === 1 ? '* * * * *' : intervalMinutes < 60 ? `*/${intervalMinutes} * * * *` : '0 * * * *';
-    cron.schedule(cronExpr, () => {
+    cronTask = cron.schedule(cronExpr, () => {
       runMonitoringCycle('scheduler').catch((err) => {
         console.error('Scheduled monitoring error:', err);
       });
@@ -927,23 +982,62 @@ ${urlsXml}
     );
 
     // Run non-blocking hub sync & monitoring cycle on startup so updates/retries publish immediately without redeploy
-    setTimeout(() => {
+    startupTimer = setTimeout(() => {
       runMonitoringCycle('startup').catch((err) => {
         console.error('Initial startup monitoring error:', err);
       });
     }, 2000);
   });
 
+  let shuttingDown = false;
   const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log(`Received ${signal}, shutting down gracefully...`);
-    server.close(() => {
-      process.exit(0);
+
+    if (startupTimer) {
+      clearTimeout(startupTimer);
+      startupTimer = null;
+    }
+    if (intervalHandle) {
+      clearInterval(intervalHandle);
+      intervalHandle = null;
+    }
+    if (cronTask) {
+      cronTask.stop();
+      cronTask = null;
+    }
+
+    for (const sseRes of activeSseClients) {
+      try {
+        sseRes.end();
+      } catch {
+        // ignore closed streams
+      }
+    }
+    activeSseClients.clear();
+
+    const forceTimer = setTimeout(() => {
+      console.warn('Graceful shutdown timed out; forcing exit.');
+      process.exit(1);
+    }, 8000);
+    forceTimer.unref();
+
+    server.close(async () => {
+      try {
+        await closeDb();
+      } catch (err) {
+        console.error('Error closing database:', err);
+      } finally {
+        clearTimeout(forceTimer);
+        process.exit(0);
+      }
     });
-    setTimeout(() => process.exit(0), 5000).unref();
+    server.closeIdleConnections?.();
   };
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer().catch((err) => {

@@ -35,6 +35,19 @@ export function getDbEngine(): DbEngine {
   return activeEngine;
 }
 
+export async function closeDb(): Promise<void> {
+  if (pgPool) {
+    const pool = pgPool;
+    pgPool = null;
+    await pool.end();
+  }
+  if (sqliteDb) {
+    const db = sqliteDb;
+    sqliteDb = null;
+    db.close();
+  }
+}
+
 export async function initDb(): Promise<DbEngine> {
   const databaseUrl = process.env.DATABASE_URL?.trim();
 

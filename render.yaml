@@ -3,12 +3,15 @@ services:
     name: mrs-auto-blog
     runtime: node
     plan: free
+    autoDeploy: true
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: "22"
       - key: CHECK_INTERVAL_MINUTES
         value: "1"
       - key: ADMIN_PATH
@@ -28,4 +31,6 @@ services:
 
 databases:
   - name: mrs-auto-blog-db
+    databaseName: mrs_auto_blog
+    user: mrs_auto_blog
     plan: free

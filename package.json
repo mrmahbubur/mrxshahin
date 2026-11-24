@@ -2,6 +2,16 @@
   "name": "mrs-auto-blog",
   "private": true,
   "version": "1.0.0",
+  "description": "Automated full-stack editorial blog platform monitoring websites and publishing grounded posts with 16:9 thumbnails.",
+  "license": "Apache-2.0",
+  "keywords": [
+    "autoblog",
+    "website-monitor",
+    "editorial",
+    "express",
+    "react",
+    "gemini"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.12.0"
