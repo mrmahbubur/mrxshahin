@@ -49,6 +49,20 @@ export function resolveAdminPath(rawValue = process.env.ADMIN_PATH): string {
   return normalized;
 }
 
+function normalizePublicBaseUrl(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim().replace(/\/+$/, '');
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString().replace(/\/+$/, '');
+    }
+  } catch {
+    console.warn(`Ignoring invalid public base URL env var: ${trimmed}`);
+  }
+  return null;
+}
+
 export function resolveRuntimeEnvironment(): RuntimeEnvironment {
   const rawPort = Number(process.env.PORT || 3000);
   const port = Number.isFinite(rawPort) && rawPort > 0 && rawPort <= 65535 ? Math.floor(rawPort) : 3000;
@@ -82,7 +96,7 @@ export function resolveRuntimeEnvironment(): RuntimeEnvironment {
     process.env.RENDER_EXTERNAL_URL?.trim() ||
     process.env.APP_URL?.trim() ||
     '';
-  const publicBaseUrl = rawBaseUrl ? rawBaseUrl.replace(/\/+$/, '') : null;
+  const publicBaseUrl = rawBaseUrl ? normalizePublicBaseUrl(rawBaseUrl) : null;
 
   return {
     port,
@@ -113,7 +127,16 @@ export function getGithubToken(): string {
   return process.env.GITHUB_TOKEN?.trim() || '';
 }
 
+let warnedShortSecret = false;
+
 export function getSessionSecret(): string {
   const configured = process.env.SESSION_SECRET?.trim();
-  return configured && configured.length >= 16 ? configured : EPHEMERAL_SESSION_SECRET;
+  if (configured && configured.length >= 16) {
+    return configured;
+  }
+  if (configured && !warnedShortSecret) {
+    warnedShortSecret = true;
+    console.warn('SESSION_SECRET is shorter than 16 characters; using an ephemeral secret instead.');
+  }
+  return EPHEMERAL_SESSION_SECRET;
 }
