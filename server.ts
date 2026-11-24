@@ -53,7 +53,10 @@ import {
 import { buildFallbackThumbnailPng, getThumbnailCachePath, saveThumbnailToDiskCache } from './server/thumbnails.ts';
 
 const PORT = Number(process.env.PORT || 3000);
-const IS_PROD = process.env.NODE_ENV === 'production';
+const HAS_BUILT_DIST = fs.existsSync(path.resolve(process.cwd(), 'dist', 'index.html'));
+const IS_TSX_RUNTIME =
+  process.execArgv.some((arg) => arg.includes('tsx')) || process.env.npm_lifecycle_event === 'dev';
+const IS_PROD = process.env.NODE_ENV === 'production' || (HAS_BUILT_DIST && !IS_TSX_RUNTIME);
 
 const RESERVED_ROUTE_PREFIXES = [
   '/api',
@@ -918,8 +921,10 @@ ${urlsXml}
 
   const cadenceLabel = useSeconds ? `${Math.floor(rawSeconds)}s` : `${intervalMinutes}m`;
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`M R S Auto Blog listening on http://0.0.0.0:${PORT} (DB: ${getDbEngine()}, interval: ${cadenceLabel})`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(
+      `M R S Auto Blog listening on http://0.0.0.0:${PORT} (mode: ${IS_PROD ? 'production' : 'development'}, DB: ${getDbEngine()}, interval: ${cadenceLabel})`
+    );
 
     // Run non-blocking hub sync & monitoring cycle on startup so updates/retries publish immediately without redeploy
     setTimeout(() => {
@@ -928,6 +933,17 @@ ${urlsXml}
       });
     }, 2000);
   });
+
+  const shutdown = (signal: string) => {
+    console.log(`Received ${signal}, shutting down gracefully...`);
+    server.close(() => {
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 5000).unref();
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 startServer().catch((err) => {

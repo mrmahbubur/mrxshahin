@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: mrs-auto-blog
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CHECK_INTERVAL_MINUTES
+        value: "1"
+      - key: ADMIN_PATH
+        value: /admin-mrs
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mrs-auto-blog-db
+          property: connectionString
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SITE_URL
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+
+databases:
+  - name: mrs-auto-blog-db
+    plan: free
