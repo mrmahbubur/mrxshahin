@@ -80,12 +80,13 @@ function deriveSiteName(anchorText: string, siteUrl: string): string {
   }
   try {
     const host = new URL(siteUrl).hostname.replace(/^www\./, '');
-    const firstPart = host.split('.')[0] || host;
-    return firstPart
+    const firstPart = (host.split('.')[0] || host).replace(/-\d{6,}$/, '');
+    const formatted = firstPart
       .split(/[-_]+/)
       .filter(Boolean)
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .map((w) => (w.toLowerCase() === 'ai' ? 'AI' : w.charAt(0).toUpperCase() + w.slice(1)))
       .join(' ');
+    return formatted || host;
   } catch {
     return siteUrl;
   }

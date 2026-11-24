@@ -105,10 +105,197 @@ OUTPUT REQUIREMENTS:
 - contentHtml: Complete sanitized-ready editorial HTML body.`;
 }
 
-async function callGeminiForArticle(report: ChangeReport): Promise<GeneratedArticlePayload> {
+function escapeHtmlText(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function isTransientAiError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const errName = err instanceof Error ? err.name : '';
+  return (
+    errName === 'AbortError' ||
+    errName === 'TimeoutError' ||
+    msg.includes('503') ||
+    msg.includes('429') ||
+    msg.includes('unavailable') ||
+    msg.includes('high demand') ||
+    msg.includes('quota') ||
+    msg.includes('rate limit') ||
+    msg.includes('aborted') ||
+    msg.includes('timeout') ||
+    msg.includes('fetch failed') ||
+    msg.includes('not configured')
+  );
+}
+
+function truncateAtWordBoundary(text: string, maxLen: number): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  if (clean.length <= maxLen) return clean;
+  const sliced = clean.slice(0, maxLen);
+  const lastSpace = sliced.lastIndexOf(' ');
+  const candidate = lastSpace > Math.floor(maxLen * 0.55) ? sliced.slice(0, lastSpace) : sliced;
+  return candidate.replace(/[,:;\-–—&\s]+$/, '').trim();
+}
+
+function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePayload {
+  const siteNameEsc = escapeHtmlText(report.siteName);
+  const siteUrlEsc = escapeHtmlText(report.siteUrl);
+  const pageTitle = report.currentTitle.trim() || report.siteName;
+  const pageDesc =
+    report.currentMetaDescription.trim() ||
+    report.textDiffSnippet.trim() ||
+    report.currentMainTextExcerpt.split(/[.!?]+/).slice(0, 2).join('. ').trim() ||
+    `${report.siteName} live web monitoring baseline and feature overview.`;
+
+  const firstHeading = report.currentHeadings[0]?.text?.trim() || '';
+  const combinedHeadline = report.isInitial
+    ? pageTitle.length < 16 && firstHeading
+      ? `${report.siteName}: ${pageTitle} — ${firstHeading}`
+      : `${report.siteName}: ${pageTitle}`
+    : `${report.siteName} Update: ${report.reason}`;
+  const rawTitle = truncateAtWordBoundary(combinedHeadline, 72);
+  const title = rawTitle.length >= 20 ? rawTitle : `${report.siteName} Editorial Dispatch & Live Site Index`;
+
+  const slug = slugify(`${report.siteName}-${report.isInitial ? 'overview' : 'update'}`);
+  const summarySentences = [
+    report.isInitial
+      ? `${report.siteName} is live at ${report.siteUrl} with an indexed baseline title of “${pageTitle}”.`
+      : `Real-time monitoring detected an update on ${report.siteName}: ${report.reason}.`,
+    pageDesc.length > 20
+      ? truncateAtWordBoundary(pageDesc, 175).replace(/[.!?\s]+$/, '') + '.'
+      : `Review the observed sections, navigation links, and structural highlights from ${report.siteName}.`,
+  ];
+  const summary = summarySentences.join(' ').slice(0, 280);
+  const metaDescription = truncateAtWordBoundary(`${report.siteName} — ${pageDesc}`, 158);
+
+  const bulletItems: string[] = [];
+  if (report.newRssItems.length > 0) {
+    for (const item of report.newRssItems.slice(0, 5)) {
+      bulletItems.push(`<li><strong>Feed Item:</strong> ${escapeHtmlText(item.title)}${item.summary ? ` — ${escapeHtmlText(item.summary.slice(0, 160))}` : ''}</li>`);
+    }
+  }
+  if (report.newGithubReleases.length > 0) {
+    for (const rel of report.newGithubReleases.slice(0, 4)) {
+      bulletItems.push(`<li><strong>Release ${escapeHtmlText(rel.tagName)}:</strong> ${escapeHtmlText(rel.name)}</li>`);
+    }
+  }
+  if (report.newGithubCommits.length > 0) {
+    for (const c of report.newGithubCommits.slice(0, 4)) {
+      bulletItems.push(`<li><strong>Commit <code>${escapeHtmlText(c.sha)}</code>:</strong> ${escapeHtmlText(c.message)}</li>`);
+    }
+  }
+  if (report.newHeadings.length > 0) {
+    for (const h of report.newHeadings.slice(0, 6)) {
+      bulletItems.push(`<li><strong>Observed Section:</strong> ${escapeHtmlText(h)}</li>`);
+    }
+  }
+  if (report.newPages.length > 0) {
+    for (const p of report.newPages.slice(0, 5)) {
+      bulletItems.push(`<li><strong>Indexed Page:</strong> <code>${escapeHtmlText(p)}</code></li>`);
+    }
+  }
+  if (bulletItems.length === 0) {
+    bulletItems.push(`<li><strong>Primary Title:</strong> ${escapeHtmlText(pageTitle)}</li>`);
+    if (report.currentMetaDescription) {
+      bulletItems.push(`<li><strong>Site Summary:</strong> ${escapeHtmlText(report.currentMetaDescription)}</li>`);
+    }
+  }
+
+  const navSectionHtml =
+    report.newNavItems.length > 0
+      ? `<p>Primary navigation links observed on the site include: ${report.newNavItems
+          .slice(0, 10)
+          .map((item) => `<strong>${escapeHtmlText(item)}</strong>`)
+          .join(', ')}.</p>`
+      : '';
+
+  const excerptClean = truncateAtWordBoundary(report.currentMainTextExcerpt, 520);
+  const excerptHtml = excerptClean
+    ? `<blockquote><p>${escapeHtmlText(excerptClean)}${report.currentMainTextExcerpt.length > 520 ? '…' : ''}</p></blockquote>`
+    : '';
+
+  const beforeAfterHtml = report.isInitial
+    ? ''
+    : `
+      <h2>Before vs. After</h2>
+      <p><strong>Previous Snapshot:</strong> ${escapeHtmlText(report.beforeSummary || 'Prior baseline index')}</p>
+      <p><strong>Current Snapshot:</strong> ${escapeHtmlText(report.afterSummary || pageTitle)}</p>
+    `;
+
+  const rawHtml = `
+    <h2>Introduction</h2>
+    <p>${
+      report.isInitial
+        ? `This dispatch establishes the live monitoring baseline for <strong>${siteNameEsc}</strong> (${siteUrlEsc}). Automated inspection captured its active title, structural headings, navigation layout, and public copy.`
+        : `Automated monitoring recorded a real-time change on <strong>${siteNameEsc}</strong>: ${escapeHtmlText(report.reason)}.`
+    }</p>
+
+    <h2>What's New</h2>
+    <ul>
+      ${bulletItems.join('\n      ')}
+    </ul>
+
+    <h2>How It Works &amp; Key Highlights</h2>
+    <p>${escapeHtmlText(pageDesc)}</p>
+    ${navSectionHtml}
+    ${excerptHtml}
+
+    <h2>Why It Matters</h2>
+    <p>Tracking ${siteNameEsc} in real time ensures structural releases, new pages, and editorial updates are surfaced immediately with verified factual context and zero guesswork.</p>
+
+    ${beforeAfterHtml}
+
+    <h2>Visit the Site</h2>
+    <p>Explore the live destination directly at <a href="${siteUrlEsc}">${siteNameEsc}</a>.</p>
+
+    <h2>Conclusion</h2>
+    <p>M R S Auto Blog continues monitoring ${siteNameEsc} on a continuous live schedule to publish verified updates as soon as new changes appear.</p>
+  `;
+
+  const tags = Array.from(
+    new Set(
+      [
+        slugify(report.siteName),
+        report.isInitial ? 'site-launch' : 'site-update',
+        report.newGithubReleases.length > 0 || report.newGithubCommits.length > 0 ? 'github' : 'web-monitoring',
+        'editorial',
+      ].filter(Boolean)
+    )
+  ).slice(0, 5);
+
+  return {
+    title,
+    slug,
+    metaDescription,
+    summary,
+    tags,
+    contentHtml: sanitizePostHtml(rawHtml),
+  };
+}
+
+async function callGeminiForArticle(
+  report: ChangeReport
+): Promise<{ article: GeneratedArticlePayload; usedAiAuthoring: boolean; fallbackReason?: string }> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
+    return {
+      article: buildGroundedFallbackArticle(report),
+      usedAiAuthoring: false,
+      fallbackReason: 'GEMINI_API_KEY not configured',
+    };
+  }
+
   const ai = getAiClient();
   const prompt = buildGenerationPrompt(report);
-  const models = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+  const models = [
+    'gemini-4-hydrogen',
+    'gemini-3.1-flash-lite',
+    'gemini-4-hydrogen',
+  ];
   let response: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
   let lastErr: unknown;
 
@@ -145,47 +332,64 @@ async function callGeminiForArticle(report: ChangeReport): Promise<GeneratedArti
       break;
     } catch (err) {
       lastErr = err;
-      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
-      const errName = err instanceof Error ? err.name : '';
-      const isTransient =
-        errName === 'AbortError' ||
-        errName === 'TimeoutError' ||
-        msg.includes('503') ||
-        msg.includes('429') ||
-        msg.includes('unavailable') ||
-        msg.includes('high demand') ||
-        msg.includes('aborted') ||
-        msg.includes('timeout');
-      if (!isTransient || i === models.length - 1) {
+      if (!isTransientAiError(err)) {
         throw err;
       }
-      await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+      if (i < models.length - 1) {
+        await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+      }
     }
   }
 
   if (!response) {
-    throw lastErr instanceof Error ? lastErr : new Error('Gemini generation failed');
+    const reason = lastErr instanceof Error ? lastErr.message : String(lastErr || 'Gemini unavailable');
+    return {
+      article: buildGroundedFallbackArticle(report),
+      usedAiAuthoring: false,
+      fallbackReason: reason,
+    };
   }
 
   const rawText = response.text?.trim();
   if (!rawText) {
-    throw new Error('Gemini returned an empty response');
+    return {
+      article: buildGroundedFallbackArticle(report),
+      usedAiAuthoring: false,
+      fallbackReason: 'Gemini returned an empty response',
+    };
   }
 
-  const parsed = JSON.parse(rawText) as Partial<GeneratedArticlePayload>;
+  let parsed: Partial<GeneratedArticlePayload>;
+  try {
+    parsed = JSON.parse(rawText) as Partial<GeneratedArticlePayload>;
+  } catch {
+    return {
+      article: buildGroundedFallbackArticle(report),
+      usedAiAuthoring: false,
+      fallbackReason: 'Gemini returned invalid JSON payload',
+    };
+  }
+
   if (!parsed.title || !parsed.contentHtml) {
-    throw new Error('Gemini JSON response missing required fields');
+    return {
+      article: buildGroundedFallbackArticle(report),
+      usedAiAuthoring: false,
+      fallbackReason: 'Gemini JSON response missing required fields',
+    };
   }
 
   return {
-    title: String(parsed.title).trim(),
-    slug: slugify(parsed.slug || parsed.title),
-    metaDescription: String(parsed.metaDescription || parsed.summary || parsed.title).trim().slice(0, 170),
-    summary: String(parsed.summary || parsed.metaDescription || parsed.title).trim(),
-    tags: Array.isArray(parsed.tags)
-      ? parsed.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean).slice(0, 6)
-      : [slugify(report.siteName)],
-    contentHtml: sanitizePostHtml(String(parsed.contentHtml)),
+    usedAiAuthoring: true,
+    article: {
+      title: String(parsed.title).trim(),
+      slug: slugify(parsed.slug || parsed.title),
+      metaDescription: String(parsed.metaDescription || parsed.summary || parsed.title).trim().slice(0, 170),
+      summary: String(parsed.summary || parsed.metaDescription || parsed.title).trim(),
+      tags: Array.isArray(parsed.tags)
+        ? parsed.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean).slice(0, 6)
+        : [slugify(report.siteName)],
+      contentHtml: sanitizePostHtml(String(parsed.contentHtml)),
+    },
   };
 }
 
@@ -194,7 +398,7 @@ export async function generateAndSavePostFromReport(report: ChangeReport): Promi
   const draftMode = (await getSetting('draft_mode')) === 'true';
   const status: PostStatus = draftMode ? 'draft' : 'published';
 
-  const article = await callGeminiForArticle(report);
+  const { article, usedAiAuthoring, fallbackReason: authoringFallback } = await callGeminiForArticle(report);
   const uniqueSlug = await ensureUniqueSlug(article.slug);
   const readingTimeMinutes = estimateReadingTime(article.contentHtml);
 
@@ -245,12 +449,14 @@ export async function generateAndSavePostFromReport(report: ChangeReport): Promi
   });
 
   await addLog({
-    level: 'success',
+    level: usedAiAuthoring ? 'success' : 'info',
     siteId: report.siteId,
     siteName: report.siteName,
-    action: 'post_generated',
-    message: `${status === 'draft' ? 'Drafted' : 'Published'} post "${post.title}"`,
-    details: `Slug: ${post.slug} (${post.readingTimeMinutes} min read)`,
+    action: usedAiAuthoring ? 'post_generated' : 'post_generated_fallback',
+    message: `${status === 'draft' ? 'Drafted' : 'Published'} post "${post.title}"${usedAiAuthoring ? '' : ' (grounded editorial fallback)'}`,
+    details: authoringFallback
+      ? `Slug: ${post.slug} (${post.readingTimeMinutes} min read) | AI fallback: ${authoringFallback}`
+      : `Slug: ${post.slug} (${post.readingTimeMinutes} min read)`,
   });
 
   emitPublicPostPublished(post);
@@ -291,7 +497,7 @@ export async function regeneratePostContent(postId: number): Promise<PostRecord>
     currentMainTextExcerpt: cheerio.load(existing.contentHtml).text().slice(0, 4000),
   };
 
-  const article = await callGeminiForArticle(report);
+  const { article, usedAiAuthoring, fallbackReason: authoringFallback } = await callGeminiForArticle(report);
   const readingTimeMinutes = estimateReadingTime(article.contentHtml);
 
   const thumbResult = await generatePostThumbnail({
@@ -315,11 +521,12 @@ export async function regeneratePostContent(postId: number): Promise<PostRecord>
   if (!updated) throw new Error('Failed to update post');
 
   await addLog({
-    level: 'success',
+    level: usedAiAuthoring ? 'success' : 'info',
     siteId: existing.siteId,
     siteName: existing.siteName,
     action: 'post_regenerated',
-    message: `Regenerated post "${updated.title}"`,
+    message: `Regenerated post "${updated.title}"${usedAiAuthoring ? '' : ' (grounded editorial fallback)'}`,
+    details: authoringFallback,
   });
 
   emitPublicPostUpdated(updated);

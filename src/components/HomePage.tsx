@@ -21,6 +21,12 @@ function formatDate(iso: string): string {
   }
 }
 
+function getLiveThumbnailSrc(post: PublicPostSummary): string {
+  return post.updatedAt && post.updatedAt !== post.publishedAt
+    ? `${post.thumbnailUrl}?v=${encodeURIComponent(post.updatedAt)}`
+    : post.thumbnailUrl;
+}
+
 export function HomePage({
   onNavigate,
   initialCategory = 'all',
@@ -237,7 +243,7 @@ export function HomePage({
               className="group lg:col-span-7 block overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822]"
             >
               <ThumbnailImage
-                src={featuredPost.thumbnailUrl}
+                src={getLiveThumbnailSrc(featuredPost)}
                 alt={featuredPost.title}
                 title={featuredPost.title}
                 siteName={featuredPost.category}
@@ -421,7 +427,7 @@ export function HomePage({
                   className="block border-b border-zinc-100 dark:border-zinc-800/80"
                 >
                   <ThumbnailImage
-                    src={post.thumbnailUrl}
+                    src={getLiveThumbnailSrc(post)}
                     alt={post.title}
                     title={post.title}
                     siteName={post.category}

@@ -331,7 +331,11 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
       {/* Hero Thumbnail */}
       <figure className="overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822]">
         <ThumbnailImage
-          src={post.thumbnailUrl}
+          src={
+            post.updatedAt && post.updatedAt !== post.publishedAt
+              ? `${post.thumbnailUrl}?v=${encodeURIComponent(post.updatedAt)}`
+              : post.thumbnailUrl
+          }
           alt={post.title}
           title={post.title}
           siteName={post.siteName}
@@ -420,7 +424,11 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
                   }}
                 >
                   <ThumbnailImage
-                    src={item.thumbnailUrl}
+                    src={
+                      item.updatedAt && item.updatedAt !== item.publishedAt
+                        ? `${item.thumbnailUrl}?v=${encodeURIComponent(item.updatedAt)}`
+                        : item.thumbnailUrl
+                    }
                     alt={item.title}
                     title={item.title}
                     siteName={item.siteName}

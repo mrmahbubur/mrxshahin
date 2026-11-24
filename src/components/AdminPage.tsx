@@ -147,9 +147,28 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
   }, [token, onSetToken]);
 
   useEffect(() => {
-    if (token) {
-      loadDashboard();
+    if (!token) return;
+    void loadDashboard();
+
+    let source: EventSource | null = null;
+    if (typeof window !== 'undefined' && typeof EventSource !== 'undefined') {
+      source = new EventSource('/api/posts/stream');
+      const refreshSilent = () => {
+        void loadDashboard();
+      };
+      source.addEventListener('post:published', refreshSilent);
+      source.addEventListener('post:updated', refreshSilent);
+      source.addEventListener('post:deleted', refreshSilent);
     }
+
+    const pollTimer = setInterval(() => {
+      void loadDashboard();
+    }, 30000);
+
+    return () => {
+      source?.close();
+      clearInterval(pollTimer);
+    };
   }, [token, loadDashboard]);
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
