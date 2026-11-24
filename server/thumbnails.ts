@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { GoogleGenAI } from '@google/genai';
 import sharp from 'sharp';
+import { getGeminiApiKey } from './env.ts';
 import { escapeXml, validateExternalUrl, validateSlug } from './security.ts';
 
 const THUMB_WIDTH = 1280;
@@ -35,7 +36,7 @@ export function saveThumbnailToDiskCache(slug: string, pngBuffer: Buffer): void 
 }
 
 function getAiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = getGeminiApiKey();
   if (!apiKey) return null;
   return new GoogleGenAI({
     apiKey,

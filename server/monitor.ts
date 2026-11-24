@@ -13,6 +13,7 @@ import {
   updateSiteStatus,
   upsertHubSite,
 } from './db.ts';
+import { getGithubToken } from './env.ts';
 import { generateAndSavePostFromReport } from './generator.ts';
 import { safeFetchText, validateExternalUrl } from './security.ts';
 import type {
@@ -333,7 +334,7 @@ async function fetchGithubActivity(githubRepoRaw: string): Promise<GithubActivit
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
   };
-  const token = process.env.GITHUB_TOKEN?.trim();
+  const token = getGithubToken();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }

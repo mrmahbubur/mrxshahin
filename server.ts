@@ -33,6 +33,10 @@ import {
   updateSite,
 } from './server/db.ts';
 import {
+  getAdminPassword,
+  resolveRuntimeEnvironment,
+} from './server/env.ts';
+import {
   emitPublicPostDeleted,
   emitPublicPostUpdated,
   subscribePublicPostEvents,
@@ -53,71 +57,10 @@ import {
 } from './server/security.ts';
 import { buildFallbackThumbnailPng, getThumbnailCachePath, saveThumbnailToDiskCache } from './server/thumbnails.ts';
 
-function resolveRuntimeEnvironment(): {
-  port: number;
-  isProd: boolean;
-  hasBuiltDist: boolean;
-  distDir: string;
-} {
-  const rawPort = Number(process.env.PORT || 3000);
-  const port = Number.isFinite(rawPort) && rawPort > 0 ? rawPort : 3000;
-  const distDir = path.resolve(process.cwd(), 'dist');
-  const hasBuiltDist = fs.existsSync(path.join(distDir, 'index.html'));
-  const nodeEnv = (process.env.NODE_ENV || '').trim().toLowerCase();
-  const isRender = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
-  const isTsxRuntime =
-    process.execArgv.some((arg) => arg.includes('tsx')) || process.env.npm_lifecycle_event === 'dev';
-
-  let isProd: boolean;
-  if (nodeEnv === 'production') {
-    isProd = true;
-  } else if (nodeEnv === 'development' || nodeEnv === 'test') {
-    isProd = false;
-  } else {
-    isProd = isRender || (hasBuiltDist && !isTsxRuntime);
-  }
-
-  return { port, isProd, hasBuiltDist, distDir };
-}
-
 const RUNTIME = resolveRuntimeEnvironment();
 const PORT = RUNTIME.port;
 const IS_PROD = RUNTIME.isProd;
-
-const RESERVED_ROUTE_PREFIXES = [
-  '/api',
-  '/post',
-  '/category',
-  '/thumbnails',
-  '/health',
-  '/robots.txt',
-  '/sitemap.xml',
-  '/rss.xml',
-  '/assets',
-  '/src',
-];
-
-function resolveAdminPath(): string {
-  const raw = (process.env.ADMIN_PATH || '/admin-mrs').trim();
-  const collapsed = raw.replace(/\/+/g, '/');
-  const withSlash = collapsed.startsWith('/') ? collapsed : `/${collapsed}`;
-  const normalized = withSlash.replace(/\/+$/, '');
-  const validFormat = /^\/[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*$/.test(normalized);
-  if (!validFormat || normalized.length > 80) {
-    return '/admin-mrs';
-  }
-
-  const lower = normalized.toLowerCase();
-  const collides = RESERVED_ROUTE_PREFIXES.some(
-    (prefix) => lower === prefix || lower.startsWith(`${prefix}/`)
-  );
-  if (collides) {
-    return '/admin-mrs';
-  }
-  return normalized;
-}
-
-const ADMIN_PATH = resolveAdminPath();
+const ADMIN_PATH = RUNTIME.adminPath;
 
 function isAdminHtmlRequest(reqPath: string): boolean {
   const cleanPath = reqPath.split('?')[0].replace(/\/+/g, '/').replace(/\/+$/, '') || '/';
@@ -152,12 +95,8 @@ function injectAdminRouteIntoHtml(html: string): string {
 }
 
 function resolveBaseUrl(req: express.Request): string {
-  const configured =
-    process.env.SITE_URL?.trim() ||
-    process.env.RENDER_EXTERNAL_URL?.trim() ||
-    process.env.APP_URL?.trim();
-  if (configured) {
-    return configured.replace(/\/+$/, '');
+  if (RUNTIME.publicBaseUrl) {
+    return RUNTIME.publicBaseUrl;
   }
   const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
   const host = req.get('x-forwarded-host') || req.get('host') || `localhost:${PORT}`;
@@ -539,7 +478,7 @@ ${urlsXml}
   app.use('/api/admin', adminApiLimiter);
 
   async function resolveAuthMode(): Promise<'env' | 'claimed' | 'bootstrap'> {
-    if (process.env.ADMIN_PASSWORD?.trim()) return 'env';
+    if (getAdminPassword()) return 'env';
     const claimed = await getSetting('admin_password_hash');
     return claimed ? 'claimed' : 'bootstrap';
   }
@@ -603,7 +542,7 @@ ${urlsXml}
         return;
       }
 
-      const envPass = process.env.ADMIN_PASSWORD?.trim();
+      const envPass = getAdminPassword();
       let valid = false;
 
       if (envPass) {
@@ -949,23 +888,19 @@ ${urlsXml}
 
   // ---------------- Real-Time Monitoring Scheduler ----------------
 
-  const rawSeconds = Number(process.env.CHECK_INTERVAL_SECONDS || 0);
-  const useSeconds = Number.isFinite(rawSeconds) && rawSeconds >= 15;
-  const rawMinutes = Number(process.env.CHECK_INTERVAL_MINUTES || 1);
-  const intervalMinutes = Number.isFinite(rawMinutes) && rawMinutes >= 1 ? Math.floor(rawMinutes) : 1;
-
   let intervalHandle: ReturnType<typeof setInterval> | null = null;
   let cronTask: ReturnType<typeof cron.schedule> | null = null;
   let startupTimer: ReturnType<typeof setTimeout> | null = null;
 
-  if (useSeconds) {
-    const intervalSec = Math.floor(rawSeconds);
+  if (RUNTIME.checkIntervalSeconds !== null) {
+    const intervalSec = RUNTIME.checkIntervalSeconds;
     intervalHandle = setInterval(() => {
       runMonitoringCycle('scheduler').catch((err) => {
         console.error('Scheduled monitoring error:', err);
       });
     }, intervalSec * 1000);
   } else {
+    const intervalMinutes = RUNTIME.checkIntervalMinutes;
     const cronExpr = intervalMinutes === 1 ? '* * * * *' : intervalMinutes < 60 ? `*/${intervalMinutes} * * * *` : '0 * * * *';
     cronTask = cron.schedule(cronExpr, () => {
       runMonitoringCycle('scheduler').catch((err) => {
@@ -974,7 +909,10 @@ ${urlsXml}
     });
   }
 
-  const cadenceLabel = useSeconds ? `${Math.floor(rawSeconds)}s` : `${intervalMinutes}m`;
+  const cadenceLabel =
+    RUNTIME.checkIntervalSeconds !== null
+      ? `${RUNTIME.checkIntervalSeconds}s`
+      : `${RUNTIME.checkIntervalMinutes}m`;
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(

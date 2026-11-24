@@ -9,6 +9,7 @@ import {
   getSiteById,
   updatePost,
 } from './db.ts';
+import { getGeminiApiKey } from './env.ts';
 import { emitPublicPostPublished, emitPublicPostUpdated } from './events.ts';
 import { sanitizePostHtml, slugify } from './security.ts';
 import { generatePostThumbnail } from './thumbnails.ts';
@@ -24,7 +25,7 @@ interface GeneratedArticlePayload {
 }
 
 function getAiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = getGeminiApiKey();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured');
   }

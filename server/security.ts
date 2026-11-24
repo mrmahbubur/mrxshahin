@@ -1,13 +1,7 @@
 import crypto from 'node:crypto';
 import net from 'node:net';
 import sanitizeHtml from 'sanitize-html';
-
-const RUNTIME_SESSION_SECRET = crypto.randomBytes(32).toString('hex');
-
-function getSessionSecret(): string {
-  const configured = process.env.SESSION_SECRET?.trim();
-  return configured && configured.length >= 16 ? configured : RUNTIME_SESSION_SECRET;
-}
+import { getSessionSecret } from './env.ts';
 
 export function sanitizePostHtml(rawHtml: string): string {
   return sanitizeHtml(rawHtml, {

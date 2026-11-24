@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import pg from 'pg';
+import { getDatabaseUrl } from './env.ts';
 import type {
   ChangeReport,
   DbEngine,
@@ -36,20 +37,35 @@ export function getDbEngine(): DbEngine {
 }
 
 export async function closeDb(): Promise<void> {
+  const errors: unknown[] = [];
+
   if (pgPool) {
     const pool = pgPool;
     pgPool = null;
-    await pool.end();
+    try {
+      await pool.end();
+    } catch (err) {
+      errors.push(err);
+    }
   }
+
   if (sqliteDb) {
     const db = sqliteDb;
     sqliteDb = null;
-    db.close();
+    try {
+      db.close();
+    } catch (err) {
+      errors.push(err);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw errors[0];
   }
 }
 
 export async function initDb(): Promise<DbEngine> {
-  const databaseUrl = process.env.DATABASE_URL?.trim();
+  const databaseUrl = getDatabaseUrl();
 
   if (databaseUrl) {
     try {
