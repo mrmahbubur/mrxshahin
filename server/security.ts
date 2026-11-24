@@ -97,6 +97,24 @@ function isPrivateOrBlockedIp(ip: string): boolean {
   return false;
 }
 
+const BLOCKED_EXTERNAL_PORTS = new Set([
+  '21',
+  '22',
+  '23',
+  '25',
+  '110',
+  '135',
+  '137',
+  '138',
+  '139',
+  '143',
+  '445',
+  '3306',
+  '5432',
+  '6379',
+  '27017',
+]);
+
 export function validateExternalUrl(rawUrl: string): URL {
   let parsed: URL;
   try {
@@ -107,6 +125,14 @@ export function validateExternalUrl(rawUrl: string): URL {
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`Unsupported URL protocol: ${parsed.protocol}`);
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new Error('Embedded credentials in external URLs are not allowed');
+  }
+
+  if (parsed.port && BLOCKED_EXTERNAL_PORTS.has(parsed.port)) {
+    throw new Error(`Blocked port: ${parsed.port}`);
   }
 
   const hostname = parsed.hostname.toLowerCase();
@@ -124,7 +150,7 @@ export function validateExternalUrl(rawUrl: string): URL {
   return parsed;
 }
 
-const TRACKING_QUERY_PARAMS = [
+const TRACKING_QUERY_PARAMS = new Set([
   'utm_source',
   'utm_medium',
   'utm_campaign',
@@ -134,17 +160,43 @@ const TRACKING_QUERY_PARAMS = [
   'ref',
   'fbclid',
   'gclid',
+  'dclid',
+  'msclkid',
+  'yclid',
+  'twclid',
+  'ttclid',
   'mc_cid',
   'mc_eid',
   'igshid',
+  'wickedid',
+  'vero_id',
+  's_kwcid',
+  '_hsenc',
+  '_hsmi',
+  'mkt_tok',
+  'oly_enc_id',
+  'oly_anon_id',
+  'si',
+  'spm',
+  'scm',
   '_cb',
-];
+]);
+
+const TRACKING_PARAM_PREFIXES = ['utm_', 'ga_', 'hsa_', 'pk_', 'mtm_'];
+
+function isTrackingQueryParam(key: string): boolean {
+  const lower = key.toLowerCase();
+  if (TRACKING_QUERY_PARAMS.has(lower)) return true;
+  return TRACKING_PARAM_PREFIXES.some((prefix) => lower.startsWith(prefix));
+}
 
 export function normalizeExternalUrl(rawUrl: string): string {
   const parsed = validateExternalUrl(rawUrl);
   parsed.hash = '';
-  for (const param of TRACKING_QUERY_PARAMS) {
-    parsed.searchParams.delete(param);
+  for (const key of Array.from(parsed.searchParams.keys())) {
+    if (isTrackingQueryParam(key)) {
+      parsed.searchParams.delete(key);
+    }
   }
   parsed.pathname = parsed.pathname.replace(/\/{2,}/g, '/');
   if (parsed.pathname.length > 1 && parsed.pathname.endsWith('/')) {

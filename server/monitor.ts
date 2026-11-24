@@ -295,9 +295,9 @@ function extractPageSignals(html: string, baseUrl: string): {
     const href = $(el).attr('href');
     if (href && (type.includes('rss') || type.includes('atom') || type.includes('xml'))) {
       try {
-        discoveredRssUrl = new URL(href, baseUrl).toString();
+        discoveredRssUrl = normalizeUrl(new URL(href, baseUrl).toString());
       } catch {
-        // ignore invalid href
+        // ignore invalid/blocked href
       }
     }
   });
@@ -307,9 +307,9 @@ function extractPageSignals(html: string, baseUrl: string): {
     const href = $(el).attr('href');
     if (href) {
       try {
-        discoveredSitemapUrl = new URL(href, baseUrl).toString();
+        discoveredSitemapUrl = normalizeUrl(new URL(href, baseUrl).toString());
       } catch {
-        // ignore
+        // ignore invalid/blocked href
       }
     }
   });
@@ -471,12 +471,23 @@ function inferGithubRepoFromUrl(rawUrl: string): string | null {
 
 async function fetchSitemapUrls(sitemapUrl: string): Promise<string[]> {
   try {
-    const res = await safeFetchText(sitemapUrl, { timeoutMs: 8000, retries: 1, cacheBust: true });
+    const normalizedTarget = normalizeUrl(sitemapUrl);
+    const res = await safeFetchText(normalizedTarget, { timeoutMs: 8000, retries: 1, cacheBust: true });
     const $ = cheerio.load(res.text, { xmlMode: true });
+    const seen = new Set<string>();
     const urls: string[] = [];
     $('url > loc, sitemap > loc').each((_, el) => {
       const loc = $(el).text().trim();
-      if (loc) urls.push(loc);
+      if (!loc) return;
+      try {
+        const normalizedLoc = normalizeUrl(new URL(loc, res.finalUrl).toString());
+        if (!seen.has(normalizedLoc)) {
+          seen.add(normalizedLoc);
+          urls.push(normalizedLoc);
+        }
+      } catch {
+        // ignore invalid or blocked sitemap entry
+      }
     });
     return urls.slice(0, 200);
   } catch {
@@ -486,13 +497,24 @@ async function fetchSitemapUrls(sitemapUrl: string): Promise<string[]> {
 
 async function fetchRssItems(rssUrl: string): Promise<RssEntry[]> {
   try {
-    const res = await safeFetchText(rssUrl, { timeoutMs: 8000, retries: 1, cacheBust: true });
+    const normalizedTarget = normalizeUrl(rssUrl);
+    const res = await safeFetchText(normalizedTarget, { timeoutMs: 8000, retries: 1, cacheBust: true });
     const $ = cheerio.load(res.text, { xmlMode: true });
     const items: RssEntry[] = [];
 
+    const normalizeFeedLink = (rawLink: string): string => {
+      const trimmed = rawLink.trim();
+      if (!trimmed) return '';
+      try {
+        return normalizeUrl(new URL(trimmed, res.finalUrl).toString());
+      } catch {
+        return '';
+      }
+    };
+
     $('item').each((_, el) => {
       const title = $(el).find('title').first().text().trim();
-      const link = $(el).find('link').first().text().trim();
+      const link = normalizeFeedLink($(el).find('link').first().text());
       const pubDate = $(el).find('pubDate').first().text().trim();
       const desc = $(el).find('description').first().text().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
       if (title) {
@@ -503,7 +525,7 @@ async function fetchRssItems(rssUrl: string): Promise<RssEntry[]> {
     if (items.length === 0) {
       $('entry').each((_, el) => {
         const title = $(el).find('title').first().text().trim();
-        const link = $(el).find('link').first().attr('href') || '';
+        const link = normalizeFeedLink($(el).find('link').first().attr('href') || '');
         const pubDate = $(el).find('updated, published').first().text().trim();
         const desc = $(el).find('summary, content').first().text().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
         if (title) {
@@ -858,7 +880,7 @@ export async function syncHubSitesOnly(): Promise<{ discovered: number; added: n
       $('link[rel="alternate"][type*="rss"], link[rel="alternate"][type*="atom"]').first().attr('href') ||
       '/rss.xml';
     try {
-      const hubRssUrl = new URL(rssHref, hubUrl).toString();
+      const hubRssUrl = normalizeUrl(new URL(rssHref, hubUrl).toString());
       const rssEntries = await fetchRssItems(hubRssUrl);
       for (const entry of rssEntries) {
         if (entry.link) addCandidate(entry.link, entry.title);
@@ -922,15 +944,16 @@ export async function checkSingleSite(
 
     const origin = new URL(res.finalUrl).origin;
     const hostLower = new URL(res.finalUrl).hostname.toLowerCase();
-    const sitemapTarget = site.sitemapUrl || signals.discoveredSitemapUrl || `${origin}/sitemap.xml`;
-    const rssTarget =
+    const sitemapTarget = normalizeUrl(site.sitemapUrl || signals.discoveredSitemapUrl || `${origin}/sitemap.xml`);
+    const rssTarget = normalizeUrl(
       site.rssUrl ||
-      signals.discoveredRssUrl ||
-      (hostLower.endsWith('.blogspot.com')
-        ? `${origin}/feeds/posts/default?alt=rss`
-        : hostLower.endsWith('.wordpress.com')
-          ? `${origin}/feed/`
-          : `${origin}/rss.xml`);
+        signals.discoveredRssUrl ||
+        (hostLower.endsWith('.blogspot.com')
+          ? `${origin}/feeds/posts/default?alt=rss`
+          : hostLower.endsWith('.wordpress.com')
+            ? `${origin}/feed/`
+            : `${origin}/rss.xml`)
+    );
 
     const resolvedGithubRepo = site.githubRepo || inferGithubRepoFromUrl(res.finalUrl);
     let [sitemapUrls, rssItems, githubData] = await Promise.all([
@@ -940,7 +963,7 @@ export async function checkSingleSite(
     ]);
 
     if (rssItems.length === 0 && !site.rssUrl && !signals.discoveredRssUrl && rssTarget.endsWith('/rss.xml')) {
-      rssItems = await fetchRssItems(`${origin}/feed/`);
+      rssItems = await fetchRssItems(normalizeUrl(`${origin}/feed`));
     }
 
     const contentHash = computeSnapshotHash({

@@ -88,13 +88,13 @@ function parseSafeArticleContent(html: string): {
 
     const children = Array.from(el.childNodes).map((child, idx) => renderNode(child, `${key}-${idx}`));
 
-    if (tag === 'h2' || tag === 'h3') {
+    if (tag === 'h2' || tag === 'h3' || tag === 'h4') {
       const text = (el.textContent || '').trim();
       const id = el.getAttribute('id') || slugifyHeading(text, headingCounter++);
-      if (text) {
+      if (text && (tag === 'h2' || tag === 'h3')) {
         toc.push({ id, text, level: tag });
       }
-      return React.createElement(tag, { key, id }, children);
+      return React.createElement(tag, { key, id, className: 'scroll-mt-24' }, children);
     }
 
     if (tag === 'a') {
@@ -209,6 +209,17 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
     () => (post ? parseSafeArticleContent(post.contentHtml) : { nodes: [], toc: [] }),
     [post]
   );
+
+  useEffect(() => {
+    if (!loading && post && typeof window !== 'undefined' && window.location.hash) {
+      const targetId = window.location.hash.slice(1);
+      if (targetId) {
+        requestAnimationFrame(() => {
+          document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+    }
+  }, [loading, post]);
 
   const handleCopyLink = async () => {
     try {
@@ -380,7 +391,8 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
                       href={`#${entry.id}`}
                       onClick={(e) => {
                         e.preventDefault();
-                        document.getElementById(entry.id)?.scrollIntoView({ behavior: 'smooth' });
+                        window.history.replaceState(null, '', `#${entry.id}`);
+                        document.getElementById(entry.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                       }}
                       className="text-zinc-600 dark:text-zinc-400 hover:text-blue-700 dark:hover:text-blue-400 transition-colors leading-snug block"
                     >

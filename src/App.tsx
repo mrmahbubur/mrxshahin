@@ -54,14 +54,18 @@ export default function App() {
     if (typeof window !== 'undefined' && window.location.hash) {
       scrollToHashTarget(window.location.hash);
     }
-    const onPopState = () => {
+    const onLocationChange = () => {
       setLocationState(getLocationPathWithQuery());
       if (window.location.hash) {
         scrollToHashTarget(window.location.hash);
       }
     };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
+    window.addEventListener('popstate', onLocationChange);
+    window.addEventListener('hashchange', onLocationChange);
+    return () => {
+      window.removeEventListener('popstate', onLocationChange);
+      window.removeEventListener('hashchange', onLocationChange);
+    };
   }, [scrollToHashTarget]);
 
   const navigate = useCallback(

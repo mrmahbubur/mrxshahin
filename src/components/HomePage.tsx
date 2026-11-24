@@ -207,7 +207,7 @@ export function HomePage({
               ? `/category/${encodeURIComponent(selectedCategory)}`
               : '/';
           const nextUrl = trimmed ? `${base}?q=${encodeURIComponent(trimmed)}` : base;
-          window.history.replaceState({}, '', nextUrl);
+          window.history.replaceState({}, '', `${nextUrl}${window.location.hash}`);
         }
       }
     }, 280);
