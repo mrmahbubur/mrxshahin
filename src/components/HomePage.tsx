@@ -70,9 +70,16 @@ export function HomePage({
         if (activeSearch) params.set('search', activeSearch);
 
         const isUnfilteredFirstPage = page === 1 && selectedCategory === 'all' && !activeSearch;
+        const fetchOptions: RequestInit = {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+        };
         const [postsRes, recentRes] = await Promise.all([
-          fetch(`/api/posts?${params.toString()}`),
-          isUnfilteredFirstPage ? Promise.resolve(null) : fetch('/api/posts?page=1&limit=5'),
+          fetch(`/api/posts?${params.toString()}`, fetchOptions),
+          isUnfilteredFirstPage ? Promise.resolve(null) : fetch('/api/posts?page=1&limit=5', fetchOptions),
         ]);
 
         if (!postsRes.ok) throw new Error('Failed to load');
@@ -385,10 +392,10 @@ export function HomePage({
       )}
 
       {/* Authentic 2-Column Blogger Layout: Main Article Stream (8 cols) + Classic Blogger Sidebar (4 cols) */}
-      <div id="archive" className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
+      <div id="archive" className="scroll-mt-24 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-start">
         {/* Main Column: Label Filter Bar + Editorial Blog Stream */}
         <div className="lg:col-span-8 space-y-8">
-          <div id="labels" className="flex items-center gap-1.5 overflow-x-auto pb-2 border-b border-zinc-200 dark:border-zinc-800">
+          <div id="labels" className="scroll-mt-24 flex items-center gap-1.5 overflow-x-auto pb-2 border-b border-zinc-200 dark:border-zinc-800">
             <button
               type="button"
               onClick={() => handleSelectCategory('all')}

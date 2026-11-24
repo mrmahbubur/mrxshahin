@@ -302,6 +302,7 @@ ${itemsXml}
 </rss>`;
 
       res.setHeader('Content-Type', 'application/rss+xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
       res.send(xml);
     } catch (err) {
       res.status(500).send('Error generating RSS feed');
@@ -327,10 +328,19 @@ ${urlsXml}
 </urlset>`;
 
       res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
       res.send(xml);
     } catch {
       res.status(500).send('Error generating sitemap');
     }
+  });
+
+  // Enforce no-store caching across all dynamic public and admin API endpoints
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
   });
 
   // ---------------- Public Blog API ----------------

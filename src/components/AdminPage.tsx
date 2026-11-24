@@ -101,7 +101,11 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
   const checkAuthStatus = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/auth/status', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
       const data = (await res.json()) as { mode: 'env' | 'claimed' | 'bootstrap'; authenticated: boolean };
       setAuthMode(data.mode);
@@ -125,7 +129,11 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
       }
       try {
         const res = await fetch('/api/admin/dashboard', {
-          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache',
+            Authorization: `Bearer ${token}`,
+          },
         });
         if (res.status === 401) {
           onSetToken(null);

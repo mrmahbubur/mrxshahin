@@ -150,7 +150,13 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
     window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
 
     const fetchPost = (silent = false) => {
-      fetch(`/api/posts/${encodeURIComponent(slug)}`)
+      fetch(`/api/posts/${encodeURIComponent(slug)}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      })
         .then(async (res) => {
           if (!res.ok) throw new Error('Dispatch not found');
           return res.json() as Promise<{ post: FullPost; related: PublicPostSummary[] }>;

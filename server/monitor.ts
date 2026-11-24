@@ -68,6 +68,9 @@ function normalizeUrl(raw: string): string {
   for (const param of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref']) {
     parsed.searchParams.delete(param);
   }
+  if (parsed.pathname.length > 1 && parsed.pathname.endsWith('/')) {
+    parsed.pathname = parsed.pathname.replace(/\/+$/, '');
+  }
   const str = parsed.toString();
   return str.endsWith('/') && parsed.pathname === '/' ? str.slice(0, -1) : str;
 }
@@ -139,6 +142,130 @@ function extractThemeColor($: cheerio.CheerioAPI): string | null {
   return null;
 }
 
+const NOISE_HEADINGS = new Set([
+  'search this blog',
+  'pages',
+  'posts',
+  'pinned post',
+  'report abuse',
+  'archive',
+  'labels',
+  'menu',
+  'navigation',
+  'cookie notice',
+]);
+
+function collectJsonLdNodes(rawJson: unknown, depth = 0): Record<string, unknown>[] {
+  if (depth > 4 || !rawJson || typeof rawJson !== 'object') return [];
+  if (Array.isArray(rawJson)) {
+    return rawJson.flatMap((entry) => collectJsonLdNodes(entry, depth + 1));
+  }
+  const obj = rawJson as Record<string, unknown>;
+  const collected: Record<string, unknown>[] = [obj];
+
+  for (const nestedKey of ['@graph', 'mainEntity', 'about', 'hasPart', 'itemListElement']) {
+    const child = obj[nestedKey];
+    if (child && typeof child === 'object') {
+      collected.push(...collectJsonLdNodes(child, depth + 1));
+    }
+  }
+  if (obj.item && typeof obj.item === 'object') {
+    collected.push(...collectJsonLdNodes(obj.item, depth + 1));
+  }
+  return collected;
+}
+
+function extractJsonLdSignals($: cheerio.CheerioAPI): {
+  facts: string[];
+  sameAsUrls: string[];
+  fallbackTitle: string;
+  fallbackDescription: string;
+} {
+  const facts: string[] = [];
+  const sameAsUrls: string[] = [];
+  let fallbackTitle = '';
+  let fallbackDescription = '';
+
+  $('script[type="application/ld+json"]').each((_, el) => {
+    const raw = $(el).text().trim();
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      const nodes = collectJsonLdNodes(parsed);
+      for (const node of nodes) {
+        const headline =
+          typeof node.headline === 'string'
+            ? node.headline.trim()
+            : typeof node.name === 'string'
+              ? node.name.trim()
+              : '';
+        const description =
+          typeof node.description === 'string'
+            ? node.description.trim()
+            : typeof node.abstract === 'string'
+              ? node.abstract.trim()
+              : '';
+
+        if (!fallbackTitle && headline) fallbackTitle = headline;
+        if (!fallbackDescription && description) fallbackDescription = description;
+
+        if (headline && description && headline.toLowerCase() !== description.toLowerCase()) {
+          facts.push(`${headline}: ${description}`);
+        } else if (description) {
+          facts.push(description);
+        }
+
+        if (typeof node.applicationCategory === 'string' && node.applicationCategory.trim()) {
+          const os = typeof node.operatingSystem === 'string' && node.operatingSystem.trim()
+            ? ` (${node.operatingSystem.trim()})`
+            : '';
+          const ver = typeof node.softwareVersion === 'string' && node.softwareVersion.trim()
+            ? ` v${node.softwareVersion.trim()}`
+            : '';
+          facts.push(`Application category: ${node.applicationCategory.trim()}${os}${ver}`);
+        }
+
+        if (Array.isArray(node.featureList)) {
+          for (const f of node.featureList) {
+            if (typeof f === 'string' && f.trim()) facts.push(f.trim());
+          }
+        } else if (typeof node.featureList === 'string' && node.featureList.trim()) {
+          facts.push(node.featureList.trim());
+        }
+
+        if (Array.isArray(node.knowsAbout)) {
+          const topics = node.knowsAbout.filter((t): t is string => typeof t === 'string' && t.trim().length > 0);
+          if (topics.length > 0) facts.push(`Focus areas: ${topics.join(', ')}`);
+        }
+
+        if (Array.isArray(node.keywords)) {
+          const kw = node.keywords.filter((k): k is string => typeof k === 'string' && k.trim().length > 0);
+          if (kw.length > 0) facts.push(`Keywords: ${kw.join(', ')}`);
+        } else if (typeof node.keywords === 'string' && node.keywords.trim()) {
+          facts.push(`Keywords: ${node.keywords.trim()}`);
+        }
+
+        if (Array.isArray(node.sameAs)) {
+          for (const item of node.sameAs) {
+            if (typeof item === 'string' && item.trim()) sameAsUrls.push(item.trim());
+          }
+        } else if (typeof node.sameAs === 'string' && node.sameAs.trim()) {
+          sameAsUrls.push(node.sameAs.trim());
+        }
+      }
+    } catch {
+      // ignore malformed JSON-LD blocks
+    }
+  });
+
+  return {
+    facts: Array.from(new Set(facts.map((f) => f.replace(/\s+/g, ' ').trim()).filter(Boolean))),
+    sameAsUrls: Array.from(new Set(sameAsUrls)),
+    fallbackTitle,
+    fallbackDescription,
+  };
+}
+
 function extractPageSignals(html: string, baseUrl: string): {
   title: string;
   metaDescription: string;
@@ -154,10 +281,20 @@ function extractPageSignals(html: string, baseUrl: string): {
   const $ = cheerio.load(html);
   const themeColor = extractThemeColor($);
 
-  const title = ($('title').first().text() || $('meta[property="og:title"]').attr('content') || '').replace(/\s+/g, ' ').trim();
+  const jsonLd = extractJsonLdSignals($);
+
+  const title = (
+    $('title').first().text() ||
+    $('meta[property="og:title"]').attr('content') ||
+    jsonLd.fallbackTitle ||
+    ''
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
   const metaDescription = (
     $('meta[name="description"]').attr('content') ||
     $('meta[property="og:description"]').attr('content') ||
+    jsonLd.fallbackDescription ||
     ''
   )
     .replace(/\s+/g, ' ')
@@ -196,14 +333,17 @@ function extractPageSignals(html: string, baseUrl: string): {
     if (t && t.length <= 45) navSet.add(t);
   });
 
-  // Headings
+  // Headings (exclude sidebar/nav/footer widget chrome)
   const headings: HeadingItem[] = [];
   const seenHeadings = new Set<string>();
   $('h1, h2, h3').each((_, el) => {
+    if ($(el).closest('nav, aside, footer, .sidebar, #sidebar, [role="complementary"]').length > 0) {
+      return;
+    }
     const text = $(el).text().replace(/\s+/g, ' ').trim();
     const level = el.tagName.toLowerCase();
     const key = `${level}:${text}`;
-    if (text && text.length <= 180 && !seenHeadings.has(key)) {
+    if (text && text.length <= 180 && !NOISE_HEADINGS.has(text.toLowerCase()) && !seenHeadings.has(key)) {
       seenHeadings.add(key);
       headings.push({ level, text });
     }
@@ -262,37 +402,13 @@ function extractPageSignals(html: string, baseUrl: string): {
     }
   });
 
-  // Extract factual structured metadata (JSON-LD & keywords) before stripping script tags
-  const structuredFacts: string[] = [];
   const metaKeywords = ($('meta[name="keywords"]').attr('content') || '').replace(/\s+/g, ' ').trim();
-  $('script[type="application/ld+json"]').each((_, el) => {
-    try {
-      const parsed = JSON.parse($(el).text()) as Record<string, unknown>;
-      const nodes: Record<string, unknown>[] = Array.isArray(parsed['@graph'])
-        ? (parsed['@graph'] as Record<string, unknown>[])
-        : [parsed];
-      for (const node of nodes) {
-        if (!node || typeof node !== 'object') continue;
-        if (typeof node.description === 'string' && node.description.trim()) {
-          structuredFacts.push(node.description.trim());
-        }
-        if (Array.isArray(node.featureList)) {
-          for (const f of node.featureList) {
-            if (typeof f === 'string' && f.trim()) structuredFacts.push(f.trim());
-          }
-        }
-        if (Array.isArray(node.knowsAbout)) {
-          const topics = node.knowsAbout.filter((t): t is string => typeof t === 'string' && t.trim().length > 0);
-          if (topics.length > 0) structuredFacts.push(`Focus areas: ${topics.join(', ')}`);
-        }
-      }
-    } catch {
-      // ignore invalid JSON-LD
-    }
-  });
+  const structuredFacts = jsonLd.facts;
 
-  // Remove non-content, form & noisy ad/script elements before extracting main text
-  $('form, script, style, noscript, svg, iframe, [aria-hidden="true"], .ads, .ad-banner, [id*="cookie"], [class*="cookie"]').remove();
+  // Remove non-content, form, modal, cookie, share, comment & ad/script chrome before extracting main text
+  $(
+    'form, script, style, noscript, svg, iframe, template, canvas, dialog, [aria-hidden="true"], [role="dialog"], [role="alert"], .ads, .ad-banner, [id*="cookie"], [class*="cookie"], .cookie-banner, .consent, .share-buttons, .post-share-buttons, .blog-pager, #comments, .comments'
+  ).remove();
 
   const mainRoot = $('main, article, [role="main"]').first();
   const rawMainText = (mainRoot.length ? mainRoot.text() : $('body').text()) || '';
@@ -301,6 +417,9 @@ function extractPageSignals(html: string, baseUrl: string): {
     .replace(/\bEnglish(?:\s+English)?\s+Sign In\s+Sign Up\b/gi, ' ')
     .replace(/\bShare\s+Report\s+©?\s*Upload APK\s*-\s*All rights reserved\.?/gi, ' ')
     .replace(/\bShare\s+Post a Comment\s+Read more\b/gi, ' ')
+    .replace(/\bSubscribe to:\s*Posts\s*\(Atom\)/gi, ' ')
+    .replace(/\bPowered by Blogger\.?/gi, ' ')
+    .replace(/\bReport Abuse\b/gi, ' ')
     .replace(/\bMore posts\b/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -364,7 +483,7 @@ function inferGithubRepoFromUrl(rawUrl: string): string | null {
 
 async function fetchSitemapUrls(sitemapUrl: string): Promise<string[]> {
   try {
-    const res = await safeFetchText(sitemapUrl, { timeoutMs: 8000, retries: 1 });
+    const res = await safeFetchText(sitemapUrl, { timeoutMs: 8000, retries: 1, cacheBust: true });
     const $ = cheerio.load(res.text, { xmlMode: true });
     const urls: string[] = [];
     $('url > loc, sitemap > loc').each((_, el) => {
@@ -379,7 +498,7 @@ async function fetchSitemapUrls(sitemapUrl: string): Promise<string[]> {
 
 async function fetchRssItems(rssUrl: string): Promise<RssEntry[]> {
   try {
-    const res = await safeFetchText(rssUrl, { timeoutMs: 8000, retries: 1 });
+    const res = await safeFetchText(rssUrl, { timeoutMs: 8000, retries: 1, cacheBust: true });
     const $ = cheerio.load(res.text, { xmlMode: true });
     const items: RssEntry[] = [];
 
@@ -449,11 +568,13 @@ async function fetchGithubActivity(githubRepoRaw: string): Promise<GithubActivit
         timeoutMs: 8000,
         retries: 1,
         headers,
+        cacheBust: true,
       }),
       safeFetchText(`https://api.github.com/repos/${repoSlug}/releases?per_page=5`, {
         timeoutMs: 8000,
         retries: 1,
         headers,
+        cacheBust: true,
       }),
     ]);
 
@@ -758,19 +879,11 @@ export async function syncHubSitesOnly(): Promise<{ discovered: number; added: n
       // ignore if hub has no RSS
     }
 
-    // 3. Structured JSON-LD sameAs links
-    $('script[type="application/ld+json"]').each((_, el) => {
-      try {
-        const parsed = JSON.parse($(el).text()) as { sameAs?: unknown };
-        if (Array.isArray(parsed.sameAs)) {
-          for (const item of parsed.sameAs) {
-            if (typeof item === 'string') addCandidate(item, '');
-          }
-        }
-      } catch {
-        // ignore malformed JSON-LD
-      }
-    });
+    // 3. Structured JSON-LD sameAs links across @graph / nested entities
+    const hubJsonLd = extractJsonLdSignals($);
+    for (const sameAsUrl of hubJsonLd.sameAsUrls) {
+      addCandidate(sameAsUrl, '');
+    }
 
     // Ensure hub itself is included if no external sites were found
     if (candidates.length === 0) {

@@ -12,7 +12,10 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLinkClick = (e: React.MouseEvent<HTMLAnchorElement>, path: string) => {
-    if (path.startsWith('/rss.xml')) return;
+    if (path.startsWith('/rss.xml')) {
+      setMobileOpen(false);
+      return;
+    }
     e.preventDefault();
     setMobileOpen(false);
     if (path.startsWith('/#')) {
@@ -30,10 +33,13 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
     onNavigate(path);
   };
 
+  const isHomeActive = currentPath === '/';
+  const isLabelsActive = currentPath.startsWith('/category/');
+
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6]/95 dark:bg-[#0B0E14]/95 backdrop-blur-sm">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-8 px-4 sm:px-6 h-16">
-        {/* Zone 1: Single-line Editorial Masthead */}
+        {/* Zone 1: Editorial Masthead */}
         <a
           href="/"
           onClick={(e) => handleLinkClick(e, '/')}
@@ -42,29 +48,34 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
           <span className="font-display text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
             M R S Auto Blog
           </span>
+          <span aria-hidden="true" className="hidden lg:inline text-zinc-300 dark:text-zinc-700">
+            /
+          </span>
           <span className="hidden lg:inline text-xs text-zinc-500 dark:text-zinc-400 font-normal">
-            Real-Time Innovation Dispatches
+            Software &amp; Web Innovation Dispatches
           </span>
         </a>
 
-        {/* Zone 2: Clean Blogger Navigation */}
+        {/* Zone 2: Editorial Navigation */}
         <nav aria-label="Main navigation" className="hidden md:flex items-center gap-7 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           <a
             href="/"
+            aria-current={isHomeActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/')}
-            className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 ${
-              currentPath === '/'
+            className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 ${
+              isHomeActive
                 ? 'text-zinc-900 dark:text-zinc-100 underline underline-offset-8 decoration-blue-700 dark:decoration-blue-400 decoration-2'
                 : ''
             }`}
           >
-            Home
+            Dispatches
           </a>
           <a
             href="/#labels"
+            aria-current={isLabelsActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/#labels')}
-            className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 ${
-              currentPath.startsWith('/category/')
+            className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 ${
+              isLabelsActive
                 ? 'text-zinc-900 dark:text-zinc-100 underline underline-offset-8 decoration-blue-700 dark:decoration-blue-400 decoration-2'
                 : ''
             }`}
@@ -74,7 +85,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
           <a
             href="/#archive"
             onClick={(e) => handleLinkClick(e, '/#archive')}
-            className="whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
+            className="whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
           >
             Archive
           </a>
@@ -82,7 +93,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             href="/rss.xml"
             target="_blank"
             rel="noopener noreferrer"
-            className="whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
+            className="whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
           >
             RSS Feed
           </a>
@@ -104,6 +115,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             type="button"
             onClick={() => setMobileOpen((v) => !v)}
             aria-label="Toggle navigation menu"
+            aria-expanded={mobileOpen}
             className="md:hidden inline-flex items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-800 p-2 text-zinc-700 dark:text-zinc-300 min-h-[40px] min-w-[40px]"
           >
             {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
@@ -115,13 +127,15 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
         <nav aria-label="Mobile navigation" className="md:hidden border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-4 py-3 flex flex-col gap-1">
           <a
             href="/"
+            aria-current={isHomeActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
           >
-            Home
+            Dispatches
           </a>
           <a
             href="/#labels"
+            aria-current={isLabelsActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/#labels')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
           >
@@ -138,6 +152,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             href="/rss.xml"
             target="_blank"
             rel="noopener noreferrer"
+            onClick={(e) => handleLinkClick(e, '/rss.xml')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
           >
             RSS Feed

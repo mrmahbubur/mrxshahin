@@ -97,30 +97,99 @@ export default function App() {
       </div>
 
       <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14]">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 text-xs text-zinc-500 dark:text-zinc-400">
-          <div className="space-y-1">
-            <p className="font-display text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-12 grid grid-cols-1 md:grid-cols-12 gap-8 items-start text-sm text-zinc-600 dark:text-zinc-400">
+          <div className="md:col-span-6 space-y-2.5">
+            <p className="font-display text-base font-semibold text-zinc-900 dark:text-zinc-100">
               M R S Auto Blog
             </p>
-            <p>© {new Date().getFullYear()} M R S Auto Blog. Real-time editorial coverage of web platforms and software releases.</p>
+            <p className="max-w-md text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+              Independent editorial coverage documenting verified software releases, live web platform capabilities, and technical troubleshooting guides as updates go live.
+            </p>
+            <p className="pt-1 text-xs text-zinc-500 dark:text-zinc-500">
+              © {new Date().getFullYear()} M R S Auto Blog. All dispatches verified from live sources.
+            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-5 font-medium">
-            <a
-              href="/"
-              onClick={(e) => {
-                e.preventDefault();
-                navigate('/');
-              }}
-              className="hover:text-zinc-900 dark:hover:text-zinc-100"
-            >
-              Home
-            </a>
-            <a href="/rss.xml" target="_blank" rel="noopener noreferrer" className="hover:text-zinc-900 dark:hover:text-zinc-100">
-              RSS 2.0 Feed
-            </a>
-            <a href="/sitemap.xml" target="_blank" rel="noopener noreferrer" className="hover:text-zinc-900 dark:hover:text-zinc-100">
-              XML Sitemap
-            </a>
+
+          <div className="md:col-span-3 space-y-2.5 text-xs">
+            <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">Sections</h2>
+            <ul className="space-y-2">
+              <li>
+                <a
+                  href="/"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate('/');
+                  }}
+                  className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                >
+                  Latest Dispatches
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/#labels"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (pathname !== '/') {
+                      navigate('/');
+                      setTimeout(() => {
+                        document.getElementById('labels')?.scrollIntoView({ behavior: 'smooth' });
+                      }, 80);
+                    } else {
+                      document.getElementById('labels')?.scrollIntoView({ behavior: 'smooth' });
+                    }
+                  }}
+                  className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                >
+                  Topic Labels
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/#archive"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (pathname !== '/') {
+                      navigate('/');
+                      setTimeout(() => {
+                        document.getElementById('archive')?.scrollIntoView({ behavior: 'smooth' });
+                      }, 80);
+                    } else {
+                      document.getElementById('archive')?.scrollIntoView({ behavior: 'smooth' });
+                    }
+                  }}
+                  className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                >
+                  Full Archive
+                </a>
+              </li>
+            </ul>
+          </div>
+
+          <div className="md:col-span-3 space-y-2.5 text-xs">
+            <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">Syndication</h2>
+            <ul className="space-y-2">
+              <li>
+                <a
+                  href="/rss.xml"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                >
+                  RSS 2.0 Feed
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/sitemap.xml"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                >
+                  XML Sitemap
+                </a>
+              </li>
+            </ul>
           </div>
         </div>
       </footer>

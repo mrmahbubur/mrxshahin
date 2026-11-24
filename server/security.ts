@@ -126,7 +126,13 @@ export function validateExternalUrl(rawUrl: string): URL {
 
 export async function safeFetchText(
   rawUrl: string,
-  options: { timeoutMs?: number; maxBytes?: number; headers?: Record<string, string>; retries?: number } = {}
+  options: {
+    timeoutMs?: number;
+    maxBytes?: number;
+    headers?: Record<string, string>;
+    retries?: number;
+    cacheBust?: boolean;
+  } = {}
 ): Promise<{ text: string; finalUrl: string; status: number; contentType: string }> {
   const timeoutMs = options.timeoutMs ?? 12000;
   const maxBytes = options.maxBytes ?? 2 * 1024 * 1024;
@@ -136,11 +142,15 @@ export async function safeFetchText(
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const validated = validateExternalUrl(rawUrl);
+      const fetchTarget = new URL(validated.toString());
+      if (options.cacheBust) {
+        fetchTarget.searchParams.set('_cb', String(Date.now()));
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
-        const res = await fetch(validated.toString(), {
+        const res = await fetch(fetchTarget.toString(), {
           method: 'GET',
           cache: 'no-store',
           redirect: 'follow',
@@ -151,6 +161,7 @@ export async function safeFetchText(
             Accept: 'text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8',
             'Cache-Control': 'no-cache, no-store, max-age=0',
             Pragma: 'no-cache',
+            Expires: '0',
             ...(options.headers ?? {}),
           },
         });
