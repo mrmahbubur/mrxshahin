@@ -33,34 +33,50 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6]/95 dark:bg-[#0B0E14]/95 backdrop-blur-sm">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-8 px-4 sm:px-6 h-16">
-        {/* Zone 1: Single-line Brand Wordmark */}
+        {/* Zone 1: Single-line Editorial Masthead */}
         <a
           href="/"
           onClick={(e) => handleLinkClick(e, '/')}
-          className="font-display text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
+          className="flex items-baseline gap-3 whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
         >
-          M R S Auto Blog
+          <span className="font-display text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+            M R S Auto Blog
+          </span>
+          <span className="hidden lg:inline text-xs text-zinc-500 dark:text-zinc-400 font-normal">
+            Real-Time Innovation Dispatches
+          </span>
         </a>
 
-        {/* Zone 2: Concise single-line public navigation links */}
-        <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-zinc-600 dark:text-zinc-400">
+        {/* Zone 2: Clean Blogger Navigation */}
+        <nav aria-label="Main navigation" className="hidden md:flex items-center gap-7 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           <a
             href="/"
             onClick={(e) => handleLinkClick(e, '/')}
             className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 ${
-              currentPath === '/' ? 'text-zinc-900 dark:text-zinc-100 underline underline-offset-8 decoration-blue-600 dark:decoration-blue-400 decoration-2' : ''
+              currentPath === '/'
+                ? 'text-zinc-900 dark:text-zinc-100 underline underline-offset-8 decoration-blue-700 dark:decoration-blue-400 decoration-2'
+                : ''
             }`}
           >
-            Dispatches
+            Home
           </a>
           <a
-            href="/#categories"
-            onClick={(e) => handleLinkClick(e, '/#categories')}
+            href="/#labels"
+            onClick={(e) => handleLinkClick(e, '/#labels')}
             className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 ${
-              currentPath.startsWith('/category/') ? 'text-zinc-900 dark:text-zinc-100 underline underline-offset-8 decoration-blue-600 dark:decoration-blue-400 decoration-2' : ''
+              currentPath.startsWith('/category/')
+                ? 'text-zinc-900 dark:text-zinc-100 underline underline-offset-8 decoration-blue-700 dark:decoration-blue-400 decoration-2'
+                : ''
             }`}
           >
-            Categories
+            Labels
+          </a>
+          <a
+            href="/#archive"
+            onClick={(e) => handleLinkClick(e, '/#archive')}
+            className="whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100"
+          >
+            Archive
           </a>
           <a
             href="/rss.xml"
@@ -72,7 +88,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
           </a>
         </nav>
 
-        {/* Zone 3: Primary Action (Theme Switch) + Mobile Menu Button */}
+        {/* Zone 3: Theme Switch + Mobile Menu */}
         <div className="flex items-center gap-3 shrink-0">
           <button
             type="button"
@@ -96,20 +112,27 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
       </div>
 
       {mobileOpen && (
-        <nav className="md:hidden border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-4 py-3 flex flex-col gap-1">
+        <nav aria-label="Mobile navigation" className="md:hidden border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-4 py-3 flex flex-col gap-1">
           <a
             href="/"
             onClick={(e) => handleLinkClick(e, '/')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
           >
-            Dispatches
+            Home
           </a>
           <a
-            href="/#categories"
-            onClick={(e) => handleLinkClick(e, '/#categories')}
+            href="/#labels"
+            onClick={(e) => handleLinkClick(e, '/#labels')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
           >
-            Categories
+            Labels
+          </a>
+          <a
+            href="/#archive"
+            onClick={(e) => handleLinkClick(e, '/#archive')}
+            className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
+          >
+            Archive
           </a>
           <a
             href="/rss.xml"

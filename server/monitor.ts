@@ -262,12 +262,72 @@ function extractPageSignals(html: string, baseUrl: string): {
     }
   });
 
-  // Remove non-content & noisy ad/script elements before extracting main text
-  $('script, style, noscript, svg, iframe, [aria-hidden="true"], .ads, .ad-banner, [id*="cookie"], [class*="cookie"]').remove();
+  // Extract factual structured metadata (JSON-LD & keywords) before stripping script tags
+  const structuredFacts: string[] = [];
+  const metaKeywords = ($('meta[name="keywords"]').attr('content') || '').replace(/\s+/g, ' ').trim();
+  $('script[type="application/ld+json"]').each((_, el) => {
+    try {
+      const parsed = JSON.parse($(el).text()) as Record<string, unknown>;
+      const nodes: Record<string, unknown>[] = Array.isArray(parsed['@graph'])
+        ? (parsed['@graph'] as Record<string, unknown>[])
+        : [parsed];
+      for (const node of nodes) {
+        if (!node || typeof node !== 'object') continue;
+        if (typeof node.description === 'string' && node.description.trim()) {
+          structuredFacts.push(node.description.trim());
+        }
+        if (Array.isArray(node.featureList)) {
+          for (const f of node.featureList) {
+            if (typeof f === 'string' && f.trim()) structuredFacts.push(f.trim());
+          }
+        }
+        if (Array.isArray(node.knowsAbout)) {
+          const topics = node.knowsAbout.filter((t): t is string => typeof t === 'string' && t.trim().length > 0);
+          if (topics.length > 0) structuredFacts.push(`Focus areas: ${topics.join(', ')}`);
+        }
+      }
+    } catch {
+      // ignore invalid JSON-LD
+    }
+  });
+
+  // Remove non-content, form & noisy ad/script elements before extracting main text
+  $('form, script, style, noscript, svg, iframe, [aria-hidden="true"], .ads, .ad-banner, [id*="cookie"], [class*="cookie"]').remove();
 
   const mainRoot = $('main, article, [role="main"]').first();
   const rawMainText = (mainRoot.length ? mainRoot.text() : $('body').text()) || '';
-  const mainText = normalizeTextForDiff(rawMainText).slice(0, 30000);
+  let mainText = normalizeTextForDiff(rawMainText)
+    .replace(/\bPlease Wait \d+ Seconds Download now with upload apk for free\b/gi, ' ')
+    .replace(/\bEnglish(?:\s+English)?\s+Sign In\s+Sign Up\b/gi, ' ')
+    .replace(/\bShare\s+Report\s+©?\s*Upload APK\s*-\s*All rights reserved\.?/gi, ' ')
+    .replace(/\bShare\s+Post a Comment\s+Read more\b/gi, ' ')
+    .replace(/\bMore posts\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 30000);
+  if (mainText.length < 180 || structuredFacts.length > 0) {
+    const isGenericUploadHost = /free apk hosting service for upload and download apps/i.test(metaDescription);
+    const cleanedMeta = isGenericUploadHost ? '' : metaDescription;
+    const fallbackStructured = Array.from(
+      new Set(
+        [cleanedMeta, ...structuredFacts, !isGenericUploadHost && metaKeywords ? `Focus & Topics: ${metaKeywords}` : '']
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    ).join(' ');
+    if (fallbackStructured) {
+      const baseText = isGenericUploadHost
+        ? mainText
+            .replace(/Free APK hosting service for Upload and Download apps[^.]*\./gi, ' ')
+            .replace(/Offers integration solutions for uploading apks[^.]*\./gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+        : mainText;
+      mainText = normalizeTextForDiff(
+        baseText.length < 80 ? fallbackStructured : `${baseText} ${fallbackStructured}`
+      ).slice(0, 30000);
+    }
+  }
 
   return {
     title,
@@ -281,6 +341,25 @@ function extractPageSignals(html: string, baseUrl: string): {
     discoveredSitemapUrl,
     themeColor,
   };
+}
+
+function inferGithubRepoFromUrl(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (host.endsWith('.github.io') && parts.length >= 1) {
+      const owner = host.slice(0, -'.github.io'.length);
+      const repo = parts[0];
+      if (owner && repo) return `${owner}/${repo}`;
+    }
+    if ((host === 'github.com' || host === 'www.github.com') && parts.length >= 2) {
+      return `${parts[0]}/${parts[1].replace(/\.git$/, '')}`;
+    }
+  } catch {
+    // ignore invalid URL
+  }
+  return null;
 }
 
 async function fetchSitemapUrls(sitemapUrl: string): Promise<string[]> {
@@ -752,10 +831,11 @@ export async function checkSingleSite(
           ? `${origin}/feed/`
           : `${origin}/rss.xml`);
 
+    const resolvedGithubRepo = site.githubRepo || inferGithubRepoFromUrl(res.finalUrl);
     let [sitemapUrls, rssItems, githubData] = await Promise.all([
       fetchSitemapUrls(sitemapTarget),
       fetchRssItems(rssTarget),
-      site.githubRepo ? fetchGithubActivity(site.githubRepo) : Promise.resolve(null),
+      resolvedGithubRepo ? fetchGithubActivity(resolvedGithubRepo) : Promise.resolve(null),
     ]);
 
     if (rssItems.length === 0 && !site.rssUrl && !signals.discoveredRssUrl && rssTarget.endsWith('/rss.xml')) {

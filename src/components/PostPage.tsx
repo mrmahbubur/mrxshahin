@@ -250,20 +250,31 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
 
   return (
     <main className="mx-auto max-w-5xl px-4 sm:px-6 py-10 sm:py-14 space-y-12">
-      {/* Back navigation */}
-      <div>
+      {/* Blogger Breadcrumb Navigation */}
+      <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
         <a
           href="/"
           onClick={(e) => {
             e.preventDefault();
             onNavigate('/');
           }}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+          className="inline-flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          <span>All Dispatches</span>
+          <span>Home</span>
         </a>
-      </div>
+        <span aria-hidden="true">/</span>
+        <a
+          href={`/category/${encodeURIComponent(post.category)}`}
+          onClick={(e) => {
+            e.preventDefault();
+            onNavigate(`/category/${encodeURIComponent(post.category)}`);
+          }}
+          className="text-blue-700 dark:text-blue-400 hover:underline"
+        >
+          {post.category}
+        </a>
+      </nav>
 
       {/* Article Header */}
       <header className="max-w-3xl space-y-4">

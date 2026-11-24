@@ -142,12 +142,15 @@ export async function safeFetchText(
       try {
         const res = await fetch(validated.toString(), {
           method: 'GET',
+          cache: 'no-store',
           redirect: 'follow',
           signal: controller.signal,
           headers: {
             'User-Agent':
               'Mozilla/5.0 (compatible; MRSAutoBlogBot/1.0; +https://mrxshahin.ai.studio)',
             Accept: 'text/html,application/xhtml+xml,application/xml,application/json;q=0.9,*/*;q=0.8',
+            'Cache-Control': 'no-cache, no-store, max-age=0',
+            Pragma: 'no-cache',
             ...(options.headers ?? {}),
           },
         });

@@ -97,14 +97,29 @@ export default function App() {
       </div>
 
       <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14]">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-zinc-500 dark:text-zinc-400">
-          <p>© {new Date().getFullYear()} M R S Auto Blog.</p>
-          <div className="flex items-center gap-5">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 text-xs text-zinc-500 dark:text-zinc-400">
+          <div className="space-y-1">
+            <p className="font-display text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              M R S Auto Blog
+            </p>
+            <p>© {new Date().getFullYear()} M R S Auto Blog. Real-time editorial coverage of web platforms and software releases.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-5 font-medium">
+            <a
+              href="/"
+              onClick={(e) => {
+                e.preventDefault();
+                navigate('/');
+              }}
+              className="hover:text-zinc-900 dark:hover:text-zinc-100"
+            >
+              Home
+            </a>
             <a href="/rss.xml" target="_blank" rel="noopener noreferrer" className="hover:text-zinc-900 dark:hover:text-zinc-100">
-              RSS
+              RSS 2.0 Feed
             </a>
             <a href="/sitemap.xml" target="_blank" rel="noopener noreferrer" className="hover:text-zinc-900 dark:hover:text-zinc-100">
-              Sitemap
+              XML Sitemap
             </a>
           </div>
         </div>

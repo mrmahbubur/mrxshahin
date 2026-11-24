@@ -147,128 +147,239 @@ function truncateAtWordBoundary(text: string, maxLen: number): string {
   return candidate.replace(/[,:;\-–—&\s]+$/, '').trim();
 }
 
+function formatShortDateText(rawDate: string): string {
+  if (!rawDate) return '';
+  const parsed = new Date(rawDate);
+  if (Number.isNaN(parsed.getTime())) return rawDate;
+  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePayload {
   const siteNameEsc = escapeHtmlText(report.siteName);
   const siteUrlEsc = escapeHtmlText(report.siteUrl);
   const pageTitle = report.currentTitle.trim() || report.siteName;
+  const rawMetaDesc = report.currentMetaDescription.trim();
+  const safeMetaDesc = /free apk hosting service for upload and download apps/i.test(rawMetaDesc)
+    ? ''
+    : rawMetaDesc;
   const pageDesc =
-    report.currentMetaDescription.trim() ||
+    safeMetaDesc ||
     report.textDiffSnippet.trim() ||
     report.currentMainTextExcerpt.split(/[.!?]+/).slice(0, 2).join('. ').trim() ||
-    `${report.siteName} live web monitoring baseline and feature overview.`;
+    `${report.siteName} live web monitoring baseline and capability index.`;
 
-  const firstHeading = report.currentHeadings[0]?.text?.trim() || '';
+  const uiNoiseHeadings = new Set([
+    pageTitle.toLowerCase(),
+    report.siteName.toLowerCase(),
+    'search this blog',
+    'pages',
+    'posts',
+    'pinned post',
+    'menu',
+    'home',
+    'navigation',
+  ]);
+  const filteredHeadings = report.currentHeadings
+    .map((h) => h.text.trim())
+    .filter((t) => t.length >= 4 && !uiNoiseHeadings.has(t.toLowerCase()));
+  const meaningfulHeading = filteredHeadings[0] || report.newRssItems[0]?.title?.trim() || '';
+
   const combinedHeadline = report.isInitial
-    ? pageTitle.length < 16 && firstHeading
-      ? `${report.siteName}: ${pageTitle} — ${firstHeading}`
-      : `${report.siteName}: ${pageTitle}`
+    ? pageTitle.length < 18 && meaningfulHeading
+      ? `${report.siteName}: ${meaningfulHeading}`
+      : pageTitle.toLowerCase().startsWith(report.siteName.toLowerCase())
+        ? pageTitle
+        : report.siteName.length > 28 && pageTitle.length >= 24
+          ? `${pageTitle} · ${report.siteName}`
+          : `${report.siteName}: ${pageTitle}`
     : `${report.siteName} Update: ${report.reason}`;
-  const rawTitle = truncateAtWordBoundary(combinedHeadline, 72);
-  const title = rawTitle.length >= 20 ? rawTitle : `${report.siteName} Editorial Dispatch & Live Site Index`;
+  const rawTitle = truncateAtWordBoundary(combinedHeadline, 96);
+  const title = rawTitle.length >= 16 ? rawTitle : `${report.siteName}: ${pageTitle}`;
 
-  const slug = slugify(`${report.siteName}-${report.isInitial ? 'overview' : 'update'}`);
+  const slug = slugify(`${report.siteName}-${report.isInitial ? 'innovations' : 'update'}`);
   const summarySentences = [
     report.isInitial
-      ? `${report.siteName} is live at ${report.siteUrl} with an indexed baseline title of “${pageTitle}”.`
-      : `Real-time monitoring detected an update on ${report.siteName}: ${report.reason}.`,
+      ? `${report.siteName} is live at ${report.siteUrl} featuring “${pageTitle}”.`
+      : `Real-time monitoring captured a live update on ${report.siteName}: ${report.reason}.`,
     pageDesc.length > 20
       ? truncateAtWordBoundary(pageDesc, 175).replace(/[.!?\s]+$/, '') + '.'
-      : `Review the observed sections, navigation links, and structural highlights from ${report.siteName}.`,
+      : `Explore the verified capabilities, active links, and technical updates observed on ${report.siteName}.`,
   ];
   const summary = summarySentences.join(' ').slice(0, 280);
   const metaDescription = truncateAtWordBoundary(`${report.siteName} — ${pageDesc}`, 158);
 
-  const bulletItems: string[] = [];
+  // Extract distinct observed innovation statements & facts from live text
+  const rawInnovationSource = /free apk hosting service for upload and download apps/i.test(report.currentMetaDescription)
+    ? report.currentMainTextExcerpt
+    : `${report.currentMetaDescription}. ${report.currentMainTextExcerpt}`;
+  const innovationSentences = Array.from(
+    new Set(
+      rawInnovationSource
+        .split(/(?<=[.!?])\s+/)
+        .map((s) => s.replace(/\s+/g, ' ').trim())
+        .filter(
+          (s) =>
+            s.length >= 28 &&
+            s.length <= 320 &&
+            !/^(English|Sign In|Free APK hosting service|Offers integration solutions)/i.test(s)
+        )
+    )
+  ).slice(0, 8);
+
+  const innovationListHtml =
+    innovationSentences.length > 0
+      ? `<ul>\n${innovationSentences.map((s) => `      <li>${escapeHtmlText(s)}</li>`).join('\n')}\n    </ul>`
+      : `<p>${escapeHtmlText(pageDesc)}</p>`;
+
+  // RSS Feed & Published Guides Section (real links, dates, summaries)
+  let rssSectionHtml = '';
   if (report.newRssItems.length > 0) {
-    for (const item of report.newRssItems.slice(0, 5)) {
-      bulletItems.push(`<li><strong>Feed Item:</strong> ${escapeHtmlText(item.title)}${item.summary ? ` — ${escapeHtmlText(item.summary.slice(0, 160))}` : ''}</li>`);
-    }
-  }
-  if (report.newGithubReleases.length > 0) {
-    for (const rel of report.newGithubReleases.slice(0, 4)) {
-      bulletItems.push(`<li><strong>Release ${escapeHtmlText(rel.tagName)}:</strong> ${escapeHtmlText(rel.name)}</li>`);
-    }
-  }
-  if (report.newGithubCommits.length > 0) {
-    for (const c of report.newGithubCommits.slice(0, 4)) {
-      bulletItems.push(`<li><strong>Commit <code>${escapeHtmlText(c.sha)}</code>:</strong> ${escapeHtmlText(c.message)}</li>`);
-    }
-  }
-  if (report.newHeadings.length > 0) {
-    for (const h of report.newHeadings.slice(0, 6)) {
-      bulletItems.push(`<li><strong>Observed Section:</strong> ${escapeHtmlText(h)}</li>`);
-    }
-  }
-  if (report.newPages.length > 0) {
-    for (const p of report.newPages.slice(0, 5)) {
-      bulletItems.push(`<li><strong>Indexed Page:</strong> <code>${escapeHtmlText(p)}</code></li>`);
-    }
-  }
-  if (bulletItems.length === 0) {
-    bulletItems.push(`<li><strong>Primary Title:</strong> ${escapeHtmlText(pageTitle)}</li>`);
-    if (report.currentMetaDescription) {
-      bulletItems.push(`<li><strong>Site Summary:</strong> ${escapeHtmlText(report.currentMetaDescription)}</li>`);
-    }
+    const items = report.newRssItems
+      .slice(0, 10)
+      .map((item) => {
+        const titleHtml = item.link
+          ? `<a href="${escapeHtmlText(item.link)}"><strong>${escapeHtmlText(item.title)}</strong></a>`
+          : `<strong>${escapeHtmlText(item.title)}</strong>`;
+        const dateStr = formatShortDateText(item.pubDate);
+        const dateHtml = dateStr ? ` <em>(${escapeHtmlText(dateStr)})</em>` : '';
+        const sumHtml = item.summary ? ` — ${escapeHtmlText(truncateAtWordBoundary(item.summary, 220))}` : '';
+        return `<li>${titleHtml}${dateHtml}${sumHtml}</li>`;
+      })
+      .join('\n      ');
+    rssSectionHtml = `
+    <h3>Published Dispatches &amp; Feed Releases</h3>
+    <p>Live syndication checks discovered ${report.newRssItems.length} active feed ${report.newRssItems.length === 1 ? 'entry' : 'entries'} from ${siteNameEsc}:</p>
+    <ul>
+      ${items}
+    </ul>`;
   }
 
-  const navSectionHtml =
-    report.newNavItems.length > 0
-      ? `<p>Primary navigation links observed on the site include: ${report.newNavItems
-          .slice(0, 10)
-          .map((item) => `<strong>${escapeHtmlText(item)}</strong>`)
-          .join(', ')}.</p>`
+  // GitHub Commits & Releases Section (real commits, SHAs, authors, releases)
+  let githubSectionHtml = '';
+  if (report.newGithubReleases.length > 0 || report.newGithubCommits.length > 0) {
+    const relItems = report.newGithubReleases
+      .slice(0, 5)
+      .map((rel) => {
+        const tagLink = rel.url
+          ? `<a href="${escapeHtmlText(rel.url)}"><strong>${escapeHtmlText(rel.tagName)}</strong></a>`
+          : `<strong>${escapeHtmlText(rel.tagName)}</strong>`;
+        const bodyTxt = rel.body ? ` — ${escapeHtmlText(truncateAtWordBoundary(rel.body, 200))}` : '';
+        return `<li>Release ${tagLink}: ${escapeHtmlText(rel.name)}${bodyTxt}</li>`;
+      })
+      .join('\n      ');
+
+    const commitItems = report.newGithubCommits
+      .slice(0, 8)
+      .map((c) => {
+        const shaLink = c.url
+          ? `<a href="${escapeHtmlText(c.url)}"><code>${escapeHtmlText(c.sha)}</code></a>`
+          : `<code>${escapeHtmlText(c.sha)}</code>`;
+        const dateStr = formatShortDateText(c.date);
+        return `<li>${shaLink} — ${escapeHtmlText(c.message)} <em>(${escapeHtmlText(c.author)}${dateStr ? `, ${escapeHtmlText(dateStr)}` : ''})</em></li>`;
+      })
+      .join('\n      ');
+
+    githubSectionHtml = `
+    <h3>Engineering Activity &amp; Source Updates</h3>
+    <ul>
+      ${relItems}
+      ${commitItems}
+    </ul>`;
+  }
+
+  // Structural Headings & Indexed Pages
+  let structureSectionHtml = '';
+  if (filteredHeadings.length > 0 || report.newPages.length > 0 || report.newNavItems.length > 0) {
+    const navLine =
+      report.newNavItems.length > 0
+        ? `<p><strong>Observed Navigation Structure:</strong> ${report.newNavItems
+            .slice(0, 12)
+            .map((n) => escapeHtmlText(n))
+            .join(' · ')}.</p>`
+        : '';
+    const headingItems = filteredHeadings
+      .slice(0, 10)
+      .map((h) => `<li>${escapeHtmlText(h)}</li>`)
+      .join('\n      ');
+    const pageItems = report.newPages
+      .slice(0, 8)
+      .map((u) => `<li><a href="${escapeHtmlText(u)}"><code>${escapeHtmlText(u)}</code></a></li>`)
+      .join('\n      ');
+    structureSectionHtml = `
+    ${navLine}
+    ${headingItems ? `<h3>Key Sections &amp; Headlines Indexed</h3><ul>\n      ${headingItems}\n    </ul>` : ''}
+    ${pageItems ? `<h3>Indexed Pages in Sitemap</h3><ul>\n      ${pageItems}\n    </ul>` : ''}`;
+  }
+
+  // Linked Destinations discovered on the page
+  const externalLinks = report.newLinks
+    .filter((l) => l.text && l.text.length >= 3 && !l.href.includes('upload-apk.com/login') && !l.href.includes('upload-apk.com/register'))
+    .slice(0, 8);
+  const linkedResourcesHtml =
+    externalLinks.length > 0
+      ? `<h3>Featured Links &amp; Ecosystem Connections</h3>
+    <ul>
+      ${externalLinks
+        .map((l) => `<li><a href="${escapeHtmlText(l.href)}">${escapeHtmlText(l.text)}</a></li>`)
+        .join('\n      ')}
+    </ul>`
       : '';
 
-  const excerptClean = truncateAtWordBoundary(report.currentMainTextExcerpt, 520);
-  const excerptHtml = excerptClean
-    ? `<blockquote><p>${escapeHtmlText(excerptClean)}${report.currentMainTextExcerpt.length > 520 ? '…' : ''}</p></blockquote>`
-    : '';
+  const excerptClean = truncateAtWordBoundary(report.currentMainTextExcerpt, 480);
+  const excerptHtml =
+    excerptClean && excerptClean.length >= 60
+      ? `<blockquote><p>${escapeHtmlText(excerptClean)}${report.currentMainTextExcerpt.length > 480 ? '…' : ''}</p></blockquote>`
+      : '';
 
   const beforeAfterHtml = report.isInitial
     ? ''
     : `
-      <h2>Before vs. After</h2>
-      <p><strong>Previous Snapshot:</strong> ${escapeHtmlText(report.beforeSummary || 'Prior baseline index')}</p>
-      <p><strong>Current Snapshot:</strong> ${escapeHtmlText(report.afterSummary || pageTitle)}</p>
-    `;
+    <h2>Before vs. After</h2>
+    <ul>
+      <li><strong>Previous Baseline:</strong> ${escapeHtmlText(report.beforeSummary || 'Prior snapshot index')}</li>
+      <li><strong>Latest Observed State:</strong> ${escapeHtmlText(report.afterSummary || pageTitle)}</li>
+      ${report.textDiffSnippet ? `<li><strong>Changed Copy Highlight:</strong> ${escapeHtmlText(truncateAtWordBoundary(report.textDiffSnippet, 320))}</li>` : ''}
+    </ul>`;
 
   const rawHtml = `
     <h2>Introduction</h2>
     <p>${
       report.isInitial
-        ? `This dispatch establishes the live monitoring baseline for <strong>${siteNameEsc}</strong> (${siteUrlEsc}). Automated inspection captured its active title, structural headings, navigation layout, and public copy.`
-        : `Automated monitoring recorded a real-time change on <strong>${siteNameEsc}</strong>: ${escapeHtmlText(report.reason)}.`
+        ? `Real-time inspection of <strong>${siteNameEsc}</strong> (<a href="${siteUrlEsc}">${siteUrlEsc}</a>) indexed its live destination under the title <strong>${escapeHtmlText(pageTitle)}</strong>. Below is a verified breakdown of every innovation, technical feature, feed release, and structural highlight observed directly from the live site.`
+        : `Continuous real-time monitoring detected an active update on <strong>${siteNameEsc}</strong> (<a href="${siteUrlEsc}">${siteUrlEsc}</a>): <strong>${escapeHtmlText(report.reason)}</strong>.`
     }</p>
 
-    <h2>What's New</h2>
-    <ul>
-      ${bulletItems.join('\n      ')}
-    </ul>
-
-    <h2>How It Works &amp; Key Highlights</h2>
-    <p>${escapeHtmlText(pageDesc)}</p>
-    ${navSectionHtml}
+    <h2>Core Innovations &amp; Real Capabilities</h2>
+    ${innovationListHtml}
     ${excerptHtml}
 
+    <h2>What's New &amp; Live Activity</h2>
+    ${rssSectionHtml || githubSectionHtml ? `${rssSectionHtml}${githubSectionHtml}` : `<p>Live verification recorded active metadata for <strong>${escapeHtmlText(pageTitle)}</strong>: ${escapeHtmlText(pageDesc)}</p>`}
+
+    <h2>How It Works &amp; Platform Structure</h2>
+    ${structureSectionHtml || `<p>${escapeHtmlText(pageDesc)}</p>`}
+    ${linkedResourcesHtml}
+
     <h2>Why It Matters</h2>
-    <p>Tracking ${siteNameEsc} in real time ensures structural releases, new pages, and editorial updates are surfaced immediately with verified factual context and zero guesswork.</p>
+    <p>Every detail documented here reflects live production output from ${siteNameEsc} rather than static assumptions. Tracking structural metadata, RSS syndication, sitemap additions, and source repository activity in real time keeps readers informed the moment new tools, guides, or platform improvements launch.</p>
 
     ${beforeAfterHtml}
 
     <h2>Visit the Site</h2>
-    <p>Explore the live destination directly at <a href="${siteUrlEsc}">${siteNameEsc}</a>.</p>
+    <p>Explore the live platform and its latest innovations directly at <a href="${siteUrlEsc}">${siteNameEsc}</a>.</p>
 
     <h2>Conclusion</h2>
-    <p>M R S Auto Blog continues monitoring ${siteNameEsc} on a continuous live schedule to publish verified updates as soon as new changes appear.</p>
+    <p>M R S Auto Blog continues monitoring ${siteNameEsc} automatically so every verified innovation, release, and content update is published to the live feed in real time.</p>
   `;
 
   const tags = Array.from(
     new Set(
       [
         slugify(report.siteName),
-        report.isInitial ? 'site-launch' : 'site-update',
-        report.newGithubReleases.length > 0 || report.newGithubCommits.length > 0 ? 'github' : 'web-monitoring',
-        'editorial',
+        report.isInitial ? 'innovations' : 'live-update',
+        report.newGithubReleases.length > 0 || report.newGithubCommits.length > 0 ? 'github' : '',
+        report.newRssItems.length > 0 ? 'articles' : '',
+        'web-monitoring',
       ].filter(Boolean)
     )
   ).slice(0, 5);
