@@ -117,34 +117,43 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
     checkAuthStatus();
   }, [checkAuthStatus]);
 
-  const loadDashboard = useCallback(async () => {
-    if (!token) return;
-    setLoadingDash(true);
-    try {
-      const res = await fetch('/api/admin/dashboard', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.status === 401) {
-        onSetToken(null);
-        return;
+  const loadDashboard = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      if (!token) return;
+      if (!options.silent) {
+        setLoadingDash(true);
       }
-      if (!res.ok) throw new Error('Failed to load admin dashboard');
-      const data = (await res.json()) as {
-        stats: AdminStats;
-        sites: AdminSite[];
-        posts: FullPost[];
-        logs: ActivityLog[];
-      };
-      setStats(data.stats);
-      setSites(data.sites);
-      setPosts(data.posts);
-      setLogs(data.logs);
-    } catch (err) {
-      setActionErr(err instanceof Error ? err.message : 'Unable to load dashboard');
-    } finally {
-      setLoadingDash(false);
-    }
-  }, [token, onSetToken]);
+      try {
+        const res = await fetch('/api/admin/dashboard', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+          onSetToken(null);
+          return;
+        }
+        if (!res.ok) throw new Error('Failed to load admin dashboard');
+        const data = (await res.json()) as {
+          stats: AdminStats;
+          sites: AdminSite[];
+          posts: FullPost[];
+          logs: ActivityLog[];
+        };
+        setStats(data.stats);
+        setSites(data.sites);
+        setPosts(data.posts);
+        setLogs(data.logs);
+      } catch (err) {
+        if (!options.silent) {
+          setActionErr(err instanceof Error ? err.message : 'Unable to load dashboard');
+        }
+      } finally {
+        if (!options.silent) {
+          setLoadingDash(false);
+        }
+      }
+    },
+    [token, onSetToken]
+  );
 
   useEffect(() => {
     if (!token) return;
@@ -154,7 +163,7 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
     if (typeof window !== 'undefined' && typeof EventSource !== 'undefined') {
       source = new EventSource('/api/posts/stream');
       const refreshSilent = () => {
-        void loadDashboard();
+        void loadDashboard({ silent: true });
       };
       source.addEventListener('post:published', refreshSilent);
       source.addEventListener('post:updated', refreshSilent);
@@ -162,8 +171,8 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
     }
 
     const pollTimer = setInterval(() => {
-      void loadDashboard();
-    }, 30000);
+      void loadDashboard({ silent: true });
+    }, 15000);
 
     return () => {
       source?.close();
@@ -586,7 +595,7 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
             </div>
             <button
               type="button"
-              onClick={loadDashboard}
+              onClick={() => void loadDashboard()}
               disabled={loadingDash}
               className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 inline-flex items-center gap-1"
             >

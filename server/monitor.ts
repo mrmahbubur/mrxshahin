@@ -72,8 +72,26 @@ function normalizeUrl(raw: string): string {
   return str.endsWith('/') && parsed.pathname === '/' ? str.slice(0, -1) : str;
 }
 
+const UPPERCASE_SITE_TOKENS = new Set([
+  'ai',
+  'api',
+  'apk',
+  'iptv',
+  'it',
+  'mrs',
+  'rss',
+  'seo',
+  'tv',
+  'ui',
+  'ux',
+]);
+
 function deriveSiteName(anchorText: string, siteUrl: string): string {
-  const cleaned = anchorText.replace(/\s+/g, ' ').trim();
+  const cleaned = anchorText
+    .replace(/[→↗◀▶›»]+/g, ' ')
+    .replace(/\s+\d{6,}$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
   const genericWords = new Set(['visit', 'open', 'launch', 'view', 'live', 'demo', 'website', 'link', 'here', 'app', 'try']);
   if (cleaned.length >= 3 && cleaned.length <= 55 && !genericWords.has(cleaned.toLowerCase())) {
     return cleaned;
@@ -84,7 +102,13 @@ function deriveSiteName(anchorText: string, siteUrl: string): string {
     const formatted = firstPart
       .split(/[-_]+/)
       .filter(Boolean)
-      .map((w) => (w.toLowerCase() === 'ai' ? 'AI' : w.charAt(0).toUpperCase() + w.slice(1)))
+      .map((w) => {
+        const lower = w.toLowerCase();
+        if (UPPERCASE_SITE_TOKENS.has(lower)) {
+          return lower === 'mrs' ? 'Mrs' : lower.toUpperCase();
+        }
+        return w.charAt(0).toUpperCase() + w.slice(1);
+      })
       .join(' ');
     return formatted || host;
   } catch {

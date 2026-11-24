@@ -110,7 +110,8 @@ function escapeHtmlText(str: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function isTransientAiError(err: unknown): boolean {
@@ -119,7 +120,10 @@ function isTransientAiError(err: unknown): boolean {
   return (
     errName === 'AbortError' ||
     errName === 'TimeoutError' ||
+    msg.includes('500') ||
+    msg.includes('502') ||
     msg.includes('503') ||
+    msg.includes('504') ||
     msg.includes('429') ||
     msg.includes('unavailable') ||
     msg.includes('high demand') ||
@@ -127,6 +131,8 @@ function isTransientAiError(err: unknown): boolean {
     msg.includes('rate limit') ||
     msg.includes('aborted') ||
     msg.includes('timeout') ||
+    msg.includes('etimedout') ||
+    msg.includes('econnreset') ||
     msg.includes('fetch failed') ||
     msg.includes('not configured')
   );
