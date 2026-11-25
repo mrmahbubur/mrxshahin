@@ -72,7 +72,7 @@ Write an engaging, reader-friendly editorial article covering the new features, 
 
 CRITICAL EDITORIAL & FACTUALITY RULES:
 1. FOCUS ONLY ON USER-FACING VALUE: new features, inventions, blog guides, apps/APKs, streaming channels, products, and services.
-2. NEVER write systemic developer plumbing posts (no Vite/Webpack/esbuild conflicts, dependency bumps, CI workflows, CSS refactors, or robotic telemetry like "3 new section heading(s)" or "similarity 14.6%").
+2. NEVER write posts about GitHub commits or systemic developer plumbing (no commit logs/SHAs, Vite/Webpack/esbuild conflicts, dependency bumps, CI workflows, CSS refactors, or robotic telemetry like "3 new section heading(s)" or "similarity 14.6%").
 3. ONLY use facts explicitly present in the MONITORING DATA below. NEVER invent features, numbers, dates, or quotes.
 4. When rich data is available, aim for 700 to 1,300 words in clean semantic HTML.
 
@@ -97,13 +97,10 @@ ${JSON.stringify(
     currentTitle: report.currentTitle,
     currentMetaDescription: report.currentMetaDescription,
     newPages: report.newPages.slice(0, 20),
-    removedPages: report.removedPages.slice(0, 15),
     newHeadings: report.newHeadings.slice(0, 25),
-    removedHeadings: report.removedHeadings.slice(0, 15),
     newNavItems: report.newNavItems.slice(0, 20),
     newLinks: report.newLinks.slice(0, 20),
     newRssItems: report.newRssItems.slice(0, 10),
-    newGithubCommits: report.newGithubCommits.slice(0, 10),
     newGithubReleases: report.newGithubReleases.slice(0, 5),
     beforeSummary: report.beforeSummary,
     afterSummary: report.afterSummary,
@@ -277,9 +274,9 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
     </ul>`;
   }
 
-  // GitHub Commits & Releases Section (real commits, SHAs, authors, releases)
+  // Public App / Version Releases Section (excludes commits)
   let githubSectionHtml = '';
-  if (report.newGithubReleases.length > 0 || report.newGithubCommits.length > 0) {
+  if (report.newGithubReleases.length > 0) {
     const relItems = report.newGithubReleases
       .slice(0, 5)
       .map((rel) => {
@@ -291,22 +288,10 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
       })
       .join('\n      ');
 
-    const commitItems = report.newGithubCommits
-      .slice(0, 8)
-      .map((c) => {
-        const shaLink = c.url
-          ? `<a href="${escapeHtmlText(c.url)}"><code>${escapeHtmlText(c.sha)}</code></a>`
-          : `<code>${escapeHtmlText(c.sha)}</code>`;
-        const dateStr = formatShortDateText(c.date);
-        return `<li>${shaLink} — ${escapeHtmlText(c.message)} <em>(${escapeHtmlText(c.author)}${dateStr ? `, ${escapeHtmlText(dateStr)}` : ''})</em></li>`;
-      })
-      .join('\n      ');
-
     githubSectionHtml = `
-    <h3>Engineering Activity &amp; Source Updates</h3>
+    <h3>Latest Public Releases</h3>
     <ul>
       ${relItems}
-      ${commitItems}
     </ul>`;
   }
 

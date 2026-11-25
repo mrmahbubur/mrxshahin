@@ -756,68 +756,36 @@ async function fetchGithubActivity(githubRepoRaw: string): Promise<GithubActivit
   }
 
   try {
-    const [commitsRes, releasesRes] = await Promise.allSettled([
-      safeFetchText(`https://api.github.com/repos/${repoSlug}/commits?per_page=8`, {
-        timeoutMs: 8000,
-        retries: 1,
-        headers,
-        cacheBust: true,
-      }),
-      safeFetchText(`https://api.github.com/repos/${repoSlug}/releases?per_page=5`, {
-        timeoutMs: 8000,
-        retries: 1,
-        headers,
-        cacheBust: true,
-      }),
-    ]);
-
-    const commits: GithubCommitEntry[] = [];
-    if (commitsRes.status === 'fulfilled') {
-      const data = JSON.parse(commitsRes.value.text) as Array<{
-        sha?: string;
-        html_url?: string;
-        commit?: { message?: string; author?: { name?: string; date?: string } };
-      }>;
-      if (Array.isArray(data)) {
-        for (const c of data) {
-          if (c.sha && c.commit?.message) {
-            commits.push({
-              sha: c.sha.slice(0, 7),
-              message: c.commit.message.split('\n')[0].slice(0, 180),
-              author: c.commit.author?.name || 'Author',
-              date: c.commit.author?.date || '',
-              url: c.html_url || '',
-            });
-          }
-        }
-      }
-    }
+    const releasesRes = await safeFetchText(`https://api.github.com/repos/${repoSlug}/releases?per_page=5`, {
+      timeoutMs: 8000,
+      retries: 1,
+      headers,
+      cacheBust: true,
+    });
 
     const releases: GithubReleaseEntry[] = [];
-    if (releasesRes.status === 'fulfilled') {
-      const data = JSON.parse(releasesRes.value.text) as Array<{
-        tag_name?: string;
-        name?: string;
-        body?: string;
-        published_at?: string;
-        html_url?: string;
-      }>;
-      if (Array.isArray(data)) {
-        for (const r of data) {
-          if (r.tag_name) {
-            releases.push({
-              tagName: r.tag_name,
-              name: r.name || r.tag_name,
-              body: (r.body || '').slice(0, 600),
-              publishedAt: r.published_at || '',
-              url: r.html_url || '',
-            });
-          }
+    const data = JSON.parse(releasesRes.text) as Array<{
+      tag_name?: string;
+      name?: string;
+      body?: string;
+      published_at?: string;
+      html_url?: string;
+    }>;
+    if (Array.isArray(data)) {
+      for (const r of data) {
+        if (r.tag_name) {
+          releases.push({
+            tagName: r.tag_name,
+            name: r.name || r.tag_name,
+            body: (r.body || '').slice(0, 600),
+            publishedAt: r.published_at || '',
+            url: r.html_url || '',
+          });
         }
       }
     }
 
-    return { commits, releases };
+    return { commits: [], releases };
   } catch {
     return null;
   }
@@ -841,7 +809,6 @@ function computeSnapshotHash(data: {
     navItems: data.navItems,
     sitemapUrls: [...data.sitemapUrls].sort(),
     rssTitles: data.rssItems.map((r) => `${r.title}|${r.link}`),
-    githubCommits: data.githubData?.commits.map((c) => c.sha) ?? [],
     githubReleases: data.githubData?.releases.map((r) => r.tagName) ?? [],
   });
   return crypto.createHash('sha256').update(canonical).digest('hex');
@@ -861,20 +828,6 @@ function tokenJaccardSimilarity(a: string, b: string): number {
   return union === 0 ? 1 : intersection / union;
 }
 
-function isSystemicCommitMessage(message: string): boolean {
-  const lower = message.trim().toLowerCase();
-  if (!lower) return true;
-  if (/^(chore|ci|build|deps|refactor|style|lint|test|docs)(\([^)]*\))?:/.test(lower)) {
-    return true;
-  }
-  if (/^merge (pull request|branch|remote-tracking)/i.test(lower)) {
-    return true;
-  }
-  return /\b(vite|esbuild|webpack|tsconfig|package-lock|bun\.lock|package\.json|lockfile|eslint|prettier|dependabot|github actions|workflow|bump\b|dependency|dependencies|peer dependency|conflict|manifest\.json|favicon|robots\.txt|sitemap\.xml|typo|formatting|cleanup|dead code|boilerplate|scaffold)\b/i.test(
-    lower
-  );
-}
-
 function isSystemicPagePath(rawUrl: string): boolean {
   const lower = rawUrl.toLowerCase();
   return /\/(manifest|sitemap|robots|feed|rss|favicon|sw\.js|service-worker|workbox|assets\/|static-data\/|\.well-known\/)/.test(
@@ -888,10 +841,6 @@ function buildChangeReport(
   current: Omit<SnapshotRecord, 'id' | 'createdAt'>,
   siteHasAnyPosts: boolean
 ): ChangeReport {
-  const userFacingInitialCommits = (current.githubData?.commits ?? []).filter(
-    (c) => !isSystemicCommitMessage(c.message)
-  );
-
   if (!previous) {
     const wordCount = current.mainText.split(/\s+/).filter(Boolean).length;
     const hasSubstance =
@@ -899,7 +848,6 @@ function buildChangeReport(
       (current.metaDescription.length >= 20 && current.title.length >= 4) ||
       current.headings.length >= 2 ||
       current.rssItems.length > 0 ||
-      userFacingInitialCommits.length > 0 ||
       (current.githubData?.releases.length ?? 0) > 0;
 
     const meaningful = !siteHasAnyPosts && hasSubstance;
@@ -925,7 +873,7 @@ function buildChangeReport(
       newNavItems: current.navItems,
       newLinks: current.links.slice(0, 20),
       newRssItems: current.rssItems.slice(0, 10),
-      newGithubCommits: userFacingInitialCommits,
+      newGithubCommits: [],
       newGithubReleases: current.githubData?.releases ?? [],
       beforeSummary: '',
       afterSummary: current.metaDescription || current.title,
@@ -959,12 +907,7 @@ function buildChangeReport(
   const newRssItems = current.rssItems.filter((r) => !prevRssKeys.has(`${r.title}|${r.link}`));
 
   const hadGithubHistory = Boolean(previous.githubData);
-  const prevCommitShas = new Set(previous.githubData?.commits.map((c) => c.sha) ?? []);
-  const newGithubCommits = hadGithubHistory
-    ? (current.githubData?.commits ?? []).filter(
-        (c) => !prevCommitShas.has(c.sha) && !isSystemicCommitMessage(c.message)
-      )
-    : [];
+  const newGithubCommits: GithubCommitEntry[] = [];
 
   const prevReleaseTags = new Set(previous.githubData?.releases.map((r) => r.tagName) ?? []);
   const newGithubReleases = hadGithubHistory
@@ -975,13 +918,12 @@ function buildChangeReport(
   const titleChanged = previous.title !== current.title && current.title.length > 0;
   const metaChanged = previous.metaDescription !== current.metaDescription && current.metaDescription.length > 0;
 
-  // Meaningful user-facing update criteria (ignores systemic refactors, build commits, and trivial copy shifts)
+  // Meaningful user-facing update criteria (ignores GitHub commits, systemic refactors, and trivial copy shifts)
   const significantTextShift =
     textSimilarity < 0.85 && Math.abs(current.mainText.length - previous.mainText.length) > 180;
   const meaningful =
     newRssItems.length > 0 ||
     newGithubReleases.length > 0 ||
-    newGithubCommits.length > 0 ||
     newPages.length > 0 ||
     newHeadings.length >= 2 ||
     newNavItems.length >= 2 ||
@@ -1013,9 +955,6 @@ function buildChangeReport(
   if (newNavItems.length >= 2) {
     reasons.push(`New sections added: ${newNavItems.slice(0, 3).join(', ')}`);
   }
-  if (newGithubCommits.length > 0) {
-    reasons.push(`New feature update: ${newGithubCommits[0].message}`);
-  }
   if (titleChanged) reasons.push(`Updated spotlight: ${current.title}`);
   if (metaChanged) reasons.push('Updated product & feature overview');
   if (significantTextShift && reasons.length === 0) {
@@ -1026,7 +965,6 @@ function buildChangeReport(
     newPages: newPages.slice(0, 10),
     newHeadings: newHeadings.slice(0, 10),
     newRssItems: newRssItems.map((r) => r.title).slice(0, 5),
-    newGithubCommits: newGithubCommits.map((c) => c.sha).slice(0, 5),
     newGithubReleases: newGithubReleases.map((r) => r.tagName).slice(0, 5),
     title: current.title,
     meta: current.metaDescription,
