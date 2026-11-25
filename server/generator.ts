@@ -394,6 +394,8 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
   };
 }
 
+let textModelCooldownUntil = 0;
+
 async function callGeminiForArticle(
   report: ChangeReport
 ): Promise<{ article: GeneratedArticlePayload; usedAiAuthoring: boolean; fallbackReason?: string }> {
@@ -406,12 +408,19 @@ async function callGeminiForArticle(
     };
   }
 
+  if (Date.now() < textModelCooldownUntil) {
+    return {
+      article: buildGroundedFallbackArticle(report),
+      usedAiAuthoring: false,
+      fallbackReason: 'Gemini text model in automatic quota cooldown; grounded authoring active',
+    };
+  }
+
   const ai = getAiClient();
   const prompt = buildGenerationPrompt(report);
   const models = [
     'gemini-4-hydrogen',
     'gemini-3.1-flash-lite',
-    'gemini-4-hydrogen',
   ];
   let response: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
   let lastErr: unknown;
@@ -424,7 +433,7 @@ async function callGeminiForArticle(
         model,
         contents: prompt,
         config: {
-          abortSignal: AbortSignal.timeout(25000),
+          abortSignal: AbortSignal.timeout(12000),
           thinkingConfig: { thinkingLevel },
           systemInstruction:
             'You are an objective editorial technology journalist. Never fabricate metrics, features, or quotes. Output valid JSON matching the requested schema.',
@@ -453,13 +462,23 @@ async function callGeminiForArticle(
         throw err;
       }
       if (i < models.length - 1) {
-        await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+        await new Promise((r) => setTimeout(r, 500));
       }
     }
   }
 
   if (!response) {
     const reason = lastErr instanceof Error ? lastErr.message : String(lastErr || 'Gemini unavailable');
+    const lowerReason = reason.toLowerCase();
+    if (
+      lowerReason.includes('429') ||
+      lowerReason.includes('quota') ||
+      lowerReason.includes('resource_exhausted') ||
+      lowerReason.includes('aborted') ||
+      lowerReason.includes('timeout')
+    ) {
+      textModelCooldownUntil = Date.now() + 10 * 60 * 1000;
+    }
     return {
       article: buildGroundedFallbackArticle(report),
       usedAiAuthoring: false,

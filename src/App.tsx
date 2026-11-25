@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AdminPage } from './components/AdminPage';
 import { Header } from './components/Header';
 import { HomePage } from './components/HomePage';
@@ -17,6 +17,21 @@ function getLocationPathWithQuery(): { pathname: string; searchQuery: string } {
   };
 }
 
+function getPreferredScrollBehavior(): ScrollBehavior {
+  if (typeof window === 'undefined') return 'auto';
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+}
+
+function decodeHashId(rawHash: string): string {
+  const stripped = rawHash.replace(/^#/, '').trim();
+  if (!stripped) return '';
+  try {
+    return decodeURIComponent(stripped);
+  } catch {
+    return stripped;
+  }
+}
+
 export default function App() {
   const [locationState, setLocationState] = useState(getLocationPathWithQuery);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -24,6 +39,7 @@ export default function App() {
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
   });
   const [adminToken, setAdminToken] = useState<string | null>(null);
+  const hashScrollCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -34,46 +50,110 @@ export default function App() {
     }
   }, [darkMode]);
 
-  const scrollToHashTarget = useCallback((hashId: string) => {
-    const cleanId = hashId.replace(/^#/, '').trim();
-    if (!cleanId) return;
-    const attemptScroll = (remaining: number) => {
-      const target = document.getElementById(cleanId);
-      if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        return;
-      }
-      if (remaining > 0) {
-        setTimeout(() => attemptScroll(remaining - 1), 60);
-      }
-    };
-    requestAnimationFrame(() => attemptScroll(5));
+  const cancelPendingHashScroll = useCallback(() => {
+    if (hashScrollCleanupRef.current) {
+      hashScrollCleanupRef.current();
+      hashScrollCleanupRef.current = null;
+    }
   }, []);
+
+  const scrollToHashTarget = useCallback(
+    (hashId: string) => {
+      cancelPendingHashScroll();
+      const cleanId = decodeHashId(hashId);
+      if (!cleanId || typeof document === 'undefined') return;
+
+      const scrollToEl = (el: HTMLElement) => {
+        el.scrollIntoView({ behavior: getPreferredScrollBehavior(), block: 'start' });
+      };
+
+      const tryScrollNow = (): boolean => {
+        const target = document.getElementById(cleanId);
+        if (!target) return false;
+        scrollToEl(target);
+        return true;
+      };
+
+      let observer: MutationObserver | null = null;
+      let fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+      let rafId = 0;
+
+      const cleanup = () => {
+        if (rafId) cancelAnimationFrame(rafId);
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+        observer?.disconnect();
+        observer = null;
+        fallbackTimer = null;
+      };
+
+      hashScrollCleanupRef.current = cleanup;
+
+      rafId = requestAnimationFrame(() => {
+        if (tryScrollNow()) {
+          cancelPendingHashScroll();
+          return;
+        }
+
+        if (typeof MutationObserver !== 'undefined' && document.body) {
+          observer = new MutationObserver(() => {
+            if (tryScrollNow()) {
+              cancelPendingHashScroll();
+            }
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+        }
+
+        fallbackTimer = setTimeout(() => {
+          tryScrollNow();
+          cancelPendingHashScroll();
+        }, 2500);
+      });
+    },
+    [cancelPendingHashScroll]
+  );
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.location.hash) {
       scrollToHashTarget(window.location.hash);
     }
-    const onLocationChange = () => {
+
+    const onPopState = () => {
       setLocationState(getLocationPathWithQuery());
       if (window.location.hash) {
         scrollToHashTarget(window.location.hash);
+      } else {
+        cancelPendingHashScroll();
       }
     };
-    window.addEventListener('popstate', onLocationChange);
-    window.addEventListener('hashchange', onLocationChange);
-    return () => {
-      window.removeEventListener('popstate', onLocationChange);
-      window.removeEventListener('hashchange', onLocationChange);
+
+    const onHashChange = () => {
+      setLocationState(getLocationPathWithQuery());
+      if (window.location.hash) {
+        scrollToHashTarget(window.location.hash);
+      } else {
+        cancelPendingHashScroll();
+        window.scrollTo({ top: 0, behavior: getPreferredScrollBehavior() });
+      }
     };
-  }, [scrollToHashTarget]);
+
+    window.addEventListener('popstate', onPopState);
+    window.addEventListener('hashchange', onHashChange);
+    return () => {
+      cancelPendingHashScroll();
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('hashchange', onHashChange);
+    };
+  }, [scrollToHashTarget, cancelPendingHashScroll]);
 
   const navigate = useCallback(
     (nextPath: string) => {
-      const [pathAndQuery, rawHash] = nextPath.split('#');
+      const hashIndex = nextPath.indexOf('#');
+      const pathAndQuery = hashIndex >= 0 ? nextPath.slice(0, hashIndex) : nextPath;
+      const rawHash = hashIndex >= 0 ? nextPath.slice(hashIndex + 1) : '';
       const targetFull = pathAndQuery || '/';
       const nextUrlWithHash = rawHash ? `${targetFull}#${rawHash}` : targetFull;
       const currentFull = window.location.pathname + window.location.search + window.location.hash;
+
       if (nextUrlWithHash !== currentFull) {
         window.history.pushState({}, '', nextUrlWithHash);
       }
@@ -82,10 +162,11 @@ export default function App() {
       if (rawHash) {
         scrollToHashTarget(rawHash);
       } else {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        cancelPendingHashScroll();
+        window.scrollTo({ top: 0, behavior: getPreferredScrollBehavior() });
       }
     },
-    [scrollToHashTarget]
+    [scrollToHashTarget, cancelPendingHashScroll]
   );
 
   const { pathname, searchQuery } = locationState;

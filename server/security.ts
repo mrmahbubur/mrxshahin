@@ -74,15 +74,37 @@ export function slugify(input: string): string {
   return base || `dispatch-${Date.now()}`;
 }
 
-function isPrivateOrBlockedIp(ip: string): boolean {
+function parseIpv4MappedHex(tail: string): string | null {
+  const hexMatch = tail.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (!hexMatch) return null;
+  const hi = Number.parseInt(hexMatch[1], 16);
+  const lo = Number.parseInt(hexMatch[2], 16);
+  if (Number.isNaN(hi) || Number.isNaN(lo)) return null;
+  return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+}
+
+function isPrivateOrBlockedIp(rawHost: string): boolean {
+  const unbracketed =
+    rawHost.startsWith('[') && rawHost.endsWith(']') ? rawHost.slice(1, -1) : rawHost;
+  const ip = unbracketed.split('%')[0].toLowerCase();
   if (!net.isIP(ip)) return false;
 
-  if (ip === '::1' || ip === '::' || ip.startsWith('fe80:') || ip.startsWith('fc') || ip.startsWith('fd')) {
+  if (
+    ip === '::1' ||
+    ip === '::' ||
+    ip.startsWith('fe80:') ||
+    ip.startsWith('fc') ||
+    ip.startsWith('fd')
+  ) {
     return true;
   }
 
-  // Handle IPv4-mapped IPv6
-  const v4 = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+  // Handle IPv4-mapped IPv6 in both dotted (::ffff:127.0.0.1) and hex (::ffff:7f00:1) forms
+  let v4 = ip;
+  if (ip.startsWith('::ffff:')) {
+    const tail = ip.slice(7);
+    v4 = net.isIPv4(tail) ? tail : parseIpv4MappedHex(tail) || '';
+  }
   if (!net.isIPv4(v4)) return false;
 
   const parts = v4.split('.').map(Number);
@@ -98,27 +120,58 @@ function isPrivateOrBlockedIp(ip: string): boolean {
 }
 
 const BLOCKED_EXTERNAL_PORTS = new Set([
+  '0',
+  '19',
   '21',
   '22',
   '23',
   '25',
+  '53',
+  '69',
   '110',
+  '111',
   '135',
   '137',
   '138',
   '139',
   '143',
+  '161',
+  '389',
   '445',
+  '465',
+  '587',
+  '636',
+  '873',
+  '993',
+  '995',
+  '1433',
+  '1521',
+  '2049',
+  '2375',
+  '2376',
+  '3128',
   '3306',
+  '3389',
   '5432',
+  '5900',
+  '5984',
   '6379',
+  '8086',
+  '9000',
+  '9200',
+  '11211',
   '27017',
 ]);
 
 export function validateExternalUrl(rawUrl: string): URL {
+  const trimmed = rawUrl.trim();
+  if (!trimmed || /[\u0000-\u001f\u007f]/.test(trimmed)) {
+    throw new Error('Invalid external URL');
+  }
+
   let parsed: URL;
   try {
-    parsed = new URL(rawUrl.trim());
+    parsed = new URL(trimmed);
   } catch {
     throw new Error(`Invalid URL: ${rawUrl}`);
   }
@@ -127,7 +180,7 @@ export function validateExternalUrl(rawUrl: string): URL {
     throw new Error(`Unsupported URL protocol: ${parsed.protocol}`);
   }
 
-  if (parsed.username || parsed.password) {
+  if (parsed.username !== '' || parsed.password !== '') {
     throw new Error('Embedded credentials in external URLs are not allowed');
   }
 
@@ -137,11 +190,14 @@ export function validateExternalUrl(rawUrl: string): URL {
 
   const hostname = parsed.hostname.toLowerCase();
   if (
+    !hostname ||
     hostname === 'localhost' ||
     hostname.endsWith('.localhost') ||
     hostname.endsWith('.local') ||
     hostname.endsWith('.internal') ||
+    hostname === 'metadata' ||
     hostname === 'metadata.google.internal' ||
+    hostname === 'instance-data' ||
     isPrivateOrBlockedIp(hostname)
   ) {
     throw new Error(`Blocked host: ${hostname}`);
@@ -158,31 +214,70 @@ const TRACKING_QUERY_PARAMS = new Set([
   'utm_content',
   'utm_id',
   'ref',
+  'ref_src',
+  'ref_url',
   'fbclid',
+  'fb_action_ids',
+  'fb_action_types',
+  'fb_ref',
+  'fb_source',
   'gclid',
+  'gbraid',
+  'wbraid',
   'dclid',
   'msclkid',
   'yclid',
   'twclid',
   'ttclid',
+  'epik',
+  'scid',
+  'irclickid',
+  'sscid',
+  'zanpid',
+  'li_fat_id',
+  'rb_clickid',
+  's_cid',
+  'cmpid',
+  'ncid',
+  'srsltid',
+  'vgo_ee',
   'mc_cid',
   'mc_eid',
+  'ck_subscriber_id',
+  'dm_i',
   'igshid',
   'wickedid',
   'vero_id',
   's_kwcid',
+  '_ga',
+  '_gl',
   '_hsenc',
   '_hsmi',
+  'hsctatracking',
+  'submissionguid',
   'mkt_tok',
   'oly_enc_id',
   'oly_anon_id',
+  'trk',
+  'trk_campaign',
   'si',
   'spm',
   'scm',
   '_cb',
 ]);
 
-const TRACKING_PARAM_PREFIXES = ['utm_', 'ga_', 'hsa_', 'pk_', 'mtm_'];
+const TRACKING_PARAM_PREFIXES = [
+  'utm_',
+  '_utm_',
+  'ga_',
+  'hsa_',
+  'pk_',
+  'mtm_',
+  'oly_',
+  'vero_',
+  'fb_action_',
+  'wicked',
+];
 
 function isTrackingQueryParam(key: string): boolean {
   const lower = key.toLowerCase();

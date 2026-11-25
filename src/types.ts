@@ -72,3 +72,17 @@ export interface AdminStats {
   draftMode: boolean;
   dbEngine: 'postgres' | 'sqlite';
 }
+
+export interface AiControlStatus {
+  autopilotEnabled: boolean;
+  maintenanceRunning: boolean;
+  systemHealth: 'healthy' | 'degraded' | 'recovering';
+  recommendedIntervalMinutes: number;
+  lastMaintenanceAt: string | null;
+  headlineDirective: string;
+  actionsExecuted: string[];
+  usedAiReasoning: boolean;
+  reasoningModel: string;
+  fallbackReason?: string | null;
+}
+

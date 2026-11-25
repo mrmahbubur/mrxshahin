@@ -14,7 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import type { ActivityLog, AdminSite, AdminStats, FullPost, LogLevel } from '../types';
+import type { ActivityLog, AdminSite, AdminStats, AiControlStatus, FullPost, LogLevel } from '../types';
 import { ThumbnailImage } from './ThumbnailImage';
 
 interface AdminPageProps {
@@ -48,6 +48,7 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
 
   const [tab, setTab] = useState<AdminTab>('posts');
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [aiControl, setAiControl] = useState<AiControlStatus | null>(null);
   const [sites, setSites] = useState<AdminSite[]>([]);
   const [posts, setPosts] = useState<FullPost[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -145,11 +146,15 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
           sites: AdminSite[];
           posts: FullPost[];
           logs: ActivityLog[];
+          aiControl?: AiControlStatus;
         };
         setStats(data.stats);
         setSites(data.sites);
         setPosts(data.posts);
         setLogs(data.logs);
+        if (data.aiControl) {
+          setAiControl(data.aiControl);
+        }
       } catch (err) {
         if (!options.silent) {
           setActionErr(err instanceof Error ? err.message : 'Unable to load dashboard');
@@ -286,6 +291,39 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
       });
       if (!res.ok) throw new Error('Failed to update draft mode');
       setActionMsg(`Switched to ${nextMode ? 'Draft mode (review before publishing)' : 'Auto-publish mode'}.`);
+    });
+
+  const handleToggleAutopilot = () =>
+    runAdminAction('ai-autopilot', async () => {
+      const nextEnabled = !(aiControl?.autopilotEnabled ?? true);
+      const res = await fetch('/api/admin/ai/autopilot', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      const data = (await res.json()) as { aiControl?: AiControlStatus; error?: string };
+      if (!res.ok) throw new Error(data.error || 'Failed to update AI autopilot');
+      if (data.aiControl) setAiControl(data.aiControl);
+      setActionMsg(
+        `Backend AI autonomous control ${nextEnabled ? 'enabled' : 'paused'}.`
+      );
+    });
+
+  const handleRunAiMaintenance = () =>
+    runAdminAction('ai-maintenance', async () => {
+      const res = await fetch('/api/admin/ai/run-maintenance', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await res.json()) as { aiControl?: AiControlStatus; error?: string };
+      if (!res.ok) throw new Error(data.error || 'AI maintenance failed');
+      if (data.aiControl) setAiControl(data.aiControl);
+      setActionMsg(
+        data.aiControl?.headlineDirective || 'Backend AI maintenance audit completed.'
+      );
     });
 
   const handleAddSite = async (e: React.FormEvent) => {
@@ -558,6 +596,74 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
           </p>
         </div>
       </section>
+
+      {/* Autonomous Backend AI Controller */}
+      {aiControl && (
+        <section
+          aria-label="Backend AI Controller"
+          className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822] p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+        >
+          <div className="space-y-1.5 min-w-0">
+            <div className="flex flex-wrap items-center gap-2.5 text-xs">
+              <span className="font-semibold text-zinc-900 dark:text-zinc-50">
+                Backend AI Controller
+              </span>
+              <span
+                className={`font-mono font-medium uppercase ${
+                  aiControl.systemHealth === 'healthy'
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : aiControl.systemHealth === 'recovering'
+                    ? 'text-amber-700 dark:text-amber-400'
+                    : 'text-red-700 dark:text-red-400'
+                }`}
+              >
+                {aiControl.systemHealth}
+              </span>
+              <span aria-hidden="true" className="text-zinc-400">·</span>
+              <span className="font-mono text-zinc-500 dark:text-zinc-400 tabular-nums">
+                Cadence: {aiControl.recommendedIntervalMinutes}m
+              </span>
+              <span aria-hidden="true" className="text-zinc-400">·</span>
+              <span className="font-mono text-zinc-500 dark:text-zinc-400">
+                Audit: {formatTimestamp(aiControl.lastMaintenanceAt)}
+              </span>
+            </div>
+            <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">
+              {aiControl.headlineDirective}
+            </p>
+            {aiControl.actionsExecuted.length > 0 && (
+              <p className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400">
+                Actions: {aiControl.actionsExecuted.join(' · ')}
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={busyAction !== null}
+              onClick={handleToggleAutopilot}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-medium transition-colors whitespace-nowrap min-h-[38px] ${
+                aiControl.autopilotEnabled
+                  ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300'
+                  : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0B0E14] text-zinc-700 dark:text-zinc-300'
+              }`}
+            >
+              <span>{aiControl.autopilotEnabled ? 'Autopilot: Active' : 'Autopilot: Paused'}</span>
+            </button>
+
+            <button
+              type="button"
+              disabled={busyAction !== null}
+              onClick={handleRunAiMaintenance}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#0B0E14] px-3.5 py-2 text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50 transition-colors whitespace-nowrap min-h-[38px]"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>{busyAction === 'ai-maintenance' ? 'Auditing...' : 'Run AI Maintenance'}</span>
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* Navigation Tabs */}
       <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800">

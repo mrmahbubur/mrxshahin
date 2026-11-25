@@ -10,12 +10,13 @@ import {
   listActiveSites,
   saveSnapshot,
   setSetting,
+  updateSiteDiscoveredMetadata,
   updateSiteStatus,
   upsertHubSite,
 } from './db.ts';
 import { getGithubToken } from './env.ts';
 import { generateAndSavePostFromReport } from './generator.ts';
-import { normalizeExternalUrl, safeFetchText, validateExternalUrl } from './security.ts';
+import { normalizeExternalUrl, safeFetchText } from './security.ts';
 import type {
   ChangeReport,
   GithubActivity,
@@ -246,9 +247,19 @@ function extractJsonLdSignals($: cheerio.CheerioAPI): {
     }
   });
 
+  const normalizedSameAs = sameAsUrls
+    .map((url) => {
+      try {
+        return normalizeUrl(url);
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean);
+
   return {
     facts: Array.from(new Set(facts.map((f) => f.replace(/\s+/g, ' ').trim()).filter(Boolean))),
-    sameAsUrls: Array.from(new Set(sameAsUrls)),
+    sameAsUrls: Array.from(new Set(normalizedSameAs)),
     fallbackTitle,
     fallbackDescription,
   };
@@ -346,11 +357,11 @@ function extractPageSignals(html: string, baseUrl: string): {
     $('meta[property="twitter:image"]').attr('content');
   if (metaHero && !metaHero.startsWith('data:')) {
     try {
-      const abs = new URL(metaHero, baseUrl).toString();
+      const abs = normalizeUrl(new URL(metaHero, baseUrl).toString());
       seenImgs.add(abs);
       images.push({ src: abs, alt: title || 'Site preview' });
     } catch {
-      // ignore invalid meta image
+      // ignore invalid/blocked meta image
     }
   }
 
@@ -359,13 +370,13 @@ function extractPageSignals(html: string, baseUrl: string): {
     const alt = ($(el).attr('alt') || '').replace(/\s+/g, ' ').trim();
     if (src && !src.startsWith('data:')) {
       try {
-        const abs = new URL(src, baseUrl).toString();
+        const abs = normalizeUrl(new URL(src, baseUrl).toString());
         if (!seenImgs.has(abs)) {
           seenImgs.add(abs);
           images.push({ src: abs, alt });
         }
       } catch {
-        // ignore
+        // ignore invalid/blocked image URL
       }
     }
   });
@@ -469,14 +480,16 @@ function inferGithubRepoFromUrl(rawUrl: string): string | null {
   return null;
 }
 
-async function fetchSitemapUrls(sitemapUrl: string): Promise<string[]> {
+async function fetchSitemapUrls(sitemapUrl: string, depth = 0): Promise<string[]> {
   try {
     const normalizedTarget = normalizeUrl(sitemapUrl);
     const res = await safeFetchText(normalizedTarget, { timeoutMs: 8000, retries: 1, cacheBust: true });
     const $ = cheerio.load(res.text, { xmlMode: true });
     const seen = new Set<string>();
     const urls: string[] = [];
-    $('url > loc, sitemap > loc').each((_, el) => {
+    const childSitemaps: string[] = [];
+
+    $('url > loc').each((_, el) => {
       const loc = $(el).text().trim();
       if (!loc) return;
       try {
@@ -489,6 +502,45 @@ async function fetchSitemapUrls(sitemapUrl: string): Promise<string[]> {
         // ignore invalid or blocked sitemap entry
       }
     });
+
+    $('sitemap > loc').each((_, el) => {
+      const loc = $(el).text().trim();
+      if (!loc) return;
+      try {
+        const normalizedLoc = normalizeUrl(new URL(loc, res.finalUrl).toString());
+        if (normalizedLoc !== normalizedTarget && !childSitemaps.includes(normalizedLoc)) {
+          childSitemaps.push(normalizedLoc);
+        }
+      } catch {
+        // ignore invalid or blocked child sitemap entry
+      }
+    });
+
+    if (depth < 1 && childSitemaps.length > 0) {
+      const nestedResults = await Promise.allSettled(
+        childSitemaps.slice(0, 3).map((childUrl) => fetchSitemapUrls(childUrl, depth + 1))
+      );
+      for (const result of nestedResults) {
+        if (result.status === 'fulfilled') {
+          for (const nestedUrl of result.value) {
+            if (!seen.has(nestedUrl)) {
+              seen.add(nestedUrl);
+              urls.push(nestedUrl);
+            }
+          }
+        }
+      }
+    }
+
+    if (urls.length === 0) {
+      for (const childUrl of childSitemaps) {
+        if (!seen.has(childUrl)) {
+          seen.add(childUrl);
+          urls.push(childUrl);
+        }
+      }
+    }
+
     return urls.slice(0, 200);
   } catch {
     return [];
@@ -835,18 +887,20 @@ function buildChangeReport(
 }
 
 export async function syncHubSitesOnly(): Promise<{ discovered: number; added: number; hubUrl: string }> {
-  const hubUrl = (await getSetting('hub_url')) || DEFAULT_HUB_URL;
-  const hubHost = new URL(hubUrl).hostname.toLowerCase();
+  const rawHubUrl = (await getSetting('hub_url')) || DEFAULT_HUB_URL;
+  const hubUrl = normalizeUrl(rawHubUrl);
 
   try {
     const res = await safeFetchText(hubUrl, { timeoutMs: 14000, retries: 2, cacheBust: true });
+    const resolvedHubUrl = normalizeUrl(res.finalUrl || hubUrl);
+    const hubHost = new URL(resolvedHubUrl).hostname.toLowerCase();
     const $ = cheerio.load(res.text);
     const seenUrls = new Set<string>();
     const candidates: Array<{ name: string; url: string; githubRepo: string | null }> = [];
 
     const addCandidate = (rawHref: string, rawLabel: string) => {
       try {
-        const abs = normalizeUrl(new URL(rawHref, hubUrl).toString());
+        const abs = normalizeUrl(new URL(rawHref, resolvedHubUrl).toString());
         const parsed = new URL(abs);
         const host = parsed.hostname.toLowerCase();
 
@@ -880,7 +934,7 @@ export async function syncHubSitesOnly(): Promise<{ discovered: number; added: n
       $('link[rel="alternate"][type*="rss"], link[rel="alternate"][type*="atom"]').first().attr('href') ||
       '/rss.xml';
     try {
-      const hubRssUrl = normalizeUrl(new URL(rssHref, hubUrl).toString());
+      const hubRssUrl = normalizeUrl(new URL(rssHref, resolvedHubUrl).toString());
       const rssEntries = await fetchRssItems(hubRssUrl);
       for (const entry of rssEntries) {
         if (entry.link) addCandidate(entry.link, entry.title);
@@ -899,7 +953,7 @@ export async function syncHubSitesOnly(): Promise<{ discovered: number; added: n
     if (candidates.length === 0) {
       candidates.push({
         name: 'M R X Shahin Studio',
-        url: normalizeUrl(hubUrl),
+        url: resolvedHubUrl,
         githubRepo: null,
       });
     }
@@ -940,10 +994,11 @@ export async function checkSingleSite(
 
   try {
     const res = await safeFetchText(site.url, { timeoutMs: 14000, retries: 2 });
-    const signals = extractPageSignals(res.text, res.finalUrl);
+    const canonicalPageUrl = normalizeUrl(res.finalUrl || site.url);
+    const signals = extractPageSignals(res.text, canonicalPageUrl);
 
-    const origin = new URL(res.finalUrl).origin;
-    const hostLower = new URL(res.finalUrl).hostname.toLowerCase();
+    const origin = new URL(canonicalPageUrl).origin;
+    const hostLower = new URL(canonicalPageUrl).hostname.toLowerCase();
     const sitemapTarget = normalizeUrl(site.sitemapUrl || signals.discoveredSitemapUrl || `${origin}/sitemap.xml`);
     const rssTarget = normalizeUrl(
       site.rssUrl ||
@@ -955,7 +1010,13 @@ export async function checkSingleSite(
             : `${origin}/rss.xml`)
     );
 
-    const resolvedGithubRepo = site.githubRepo || inferGithubRepoFromUrl(res.finalUrl);
+    const resolvedGithubRepo = site.githubRepo || inferGithubRepoFromUrl(canonicalPageUrl);
+    await updateSiteDiscoveredMetadata(site.id, {
+      rssUrl: signals.discoveredRssUrl,
+      sitemapUrl: signals.discoveredSitemapUrl,
+      githubRepo: resolvedGithubRepo,
+    });
+
     let [sitemapUrls, rssItems, githubData] = await Promise.all([
       fetchSitemapUrls(sitemapTarget),
       fetchRssItems(rssTarget),
@@ -980,7 +1041,7 @@ export async function checkSingleSite(
     const previousSnapshot = await getLatestSnapshot(site.id);
     const currentSnapshotPayload: Omit<SnapshotRecord, 'id' | 'createdAt'> = {
       siteId: site.id,
-      pageUrl: res.finalUrl,
+      pageUrl: canonicalPageUrl,
       contentHash,
       title: signals.title,
       metaDescription: signals.metaDescription,
@@ -1099,25 +1160,33 @@ export async function runMonitoringCycle(
 
     await syncHubSitesOnly();
     const sites = await listActiveSites();
+    const concurrency = Math.min(3, Math.max(1, sites.length));
+    let cursor = 0;
 
-    for (const site of sites) {
-      sitesChecked++;
-      try {
-        const result = await checkSingleSite(site.id);
-        if (result.status === 'error') errors++;
-        if (result.postCreated) postsCreated++;
-      } catch (err) {
-        errors++;
-        await addLog({
-          level: 'error',
-          siteId: site.id,
-          siteName: site.name,
-          action: 'cycle_site_error',
-          message: `Unhandled error checking ${site.name}`,
-          details: err instanceof Error ? err.message : String(err),
-        });
+    const runWorker = async () => {
+      while (cursor < sites.length) {
+        const site = sites[cursor++];
+        if (!site) break;
+        sitesChecked++;
+        try {
+          const result = await checkSingleSite(site.id);
+          if (result.status === 'error') errors++;
+          if (result.postCreated) postsCreated++;
+        } catch (err) {
+          errors++;
+          await addLog({
+            level: 'error',
+            siteId: site.id,
+            siteName: site.name,
+            action: 'cycle_site_error',
+            message: `Unhandled error checking ${site.name}`,
+            details: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
-    }
+    };
+
+    await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
 
     await setSetting('last_run_at', startedAt);
     await setSetting(

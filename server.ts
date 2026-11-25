@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import cron from 'node-cron';
+import {
+  getAiControlStatus,
+  getRecommendedIntervalMinutes,
+  runAiMaintenanceAndControl,
+  runAutonomousCycle,
+  setAiAutopilotEnabled,
+} from './server/aiController.ts';
 import {
   addLog,
   claimAdminPasswordHashAtomic,
@@ -42,7 +48,7 @@ import {
   subscribePublicPostEvents,
 } from './server/events.ts';
 import { regeneratePostContent, regeneratePostThumbnailOnly } from './server/generator.ts';
-import { checkSingleSite, isCheckRunning, runMonitoringCycle, syncHubSitesOnly } from './server/monitor.ts';
+import { checkSingleSite, isCheckRunning, syncHubSitesOnly } from './server/monitor.ts';
 import {
   escapeXml,
   hashPassword,
@@ -597,11 +603,12 @@ ${urlsXml}
 
   app.get('/api/admin/dashboard', requireAdmin, async (_req, res) => {
     try {
-      const [stats, sites, posts, logs] = await Promise.all([
+      const [stats, sites, posts, logs, aiControl] = await Promise.all([
         getAdminStats(),
         listSites(),
         listAllPosts(),
         listLogs(150),
+        getAiControlStatus(),
       ]);
       res.json({
         stats,
@@ -609,6 +616,7 @@ ${urlsXml}
         posts,
         logs,
         checkInProgress: isCheckRunning(),
+        aiControl,
       });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to load dashboard' });
@@ -617,10 +625,29 @@ ${urlsXml}
 
   app.post('/api/admin/check-now', requireAdmin, async (_req, res) => {
     try {
-      const result = await runMonitoringCycle('manual');
+      const result = await runAutonomousCycle('manual');
       res.json(result);
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Monitoring check failed' });
+    }
+  });
+
+  app.post('/api/admin/ai/run-maintenance', requireAdmin, async (_req, res) => {
+    try {
+      const aiControl = await runAiMaintenanceAndControl('manual');
+      res.json({ aiControl });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'AI maintenance failed' });
+    }
+  });
+
+  app.post('/api/admin/ai/autopilot', requireAdmin, async (req, res) => {
+    try {
+      const enabled = Boolean(req.body?.enabled);
+      const aiControl = await setAiAutopilotEnabled(enabled);
+      res.json({ aiControl });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to update AI autopilot' });
     }
   });
 
@@ -904,48 +931,64 @@ ${urlsXml}
     });
   }
 
-  // ---------------- Real-Time Monitoring Scheduler ----------------
+  // ---------------- Autonomous Backend AI Scheduler ----------------
 
   let intervalHandle: ReturnType<typeof setInterval> | null = null;
-  let cronTask: ReturnType<typeof cron.schedule> | null = null;
+  let adaptiveTimer: ReturnType<typeof setTimeout> | null = null;
   let startupTimer: ReturnType<typeof setTimeout> | null = null;
+  let shuttingDown = false;
+
+  const scheduleNextAdaptiveCycle = async () => {
+    if (shuttingDown || RUNTIME.checkIntervalSeconds !== null) return;
+    let nextMinutes = RUNTIME.checkIntervalMinutes;
+    try {
+      nextMinutes = await getRecommendedIntervalMinutes();
+    } catch {
+      nextMinutes = RUNTIME.checkIntervalMinutes;
+    }
+    const delayMs = Math.max(1, nextMinutes) * 60 * 1000;
+    adaptiveTimer = setTimeout(async () => {
+      try {
+        await runAutonomousCycle('scheduler');
+      } catch (err) {
+        console.error('Scheduled autonomous AI cycle error:', err);
+      } finally {
+        void scheduleNextAdaptiveCycle();
+      }
+    }, delayMs);
+  };
 
   if (RUNTIME.checkIntervalSeconds !== null) {
     const intervalSec = RUNTIME.checkIntervalSeconds;
     intervalHandle = setInterval(() => {
-      runMonitoringCycle('scheduler').catch((err) => {
-        console.error('Scheduled monitoring error:', err);
+      runAutonomousCycle('scheduler').catch((err) => {
+        console.error('Scheduled autonomous AI cycle error:', err);
       });
     }, intervalSec * 1000);
-  } else {
-    const intervalMinutes = RUNTIME.checkIntervalMinutes;
-    const cronExpr = intervalMinutes === 1 ? '* * * * *' : intervalMinutes < 60 ? `*/${intervalMinutes} * * * *` : '0 * * * *';
-    cronTask = cron.schedule(cronExpr, () => {
-      runMonitoringCycle('scheduler').catch((err) => {
-        console.error('Scheduled monitoring error:', err);
-      });
-    });
   }
 
   const cadenceLabel =
     RUNTIME.checkIntervalSeconds !== null
       ? `${RUNTIME.checkIntervalSeconds}s`
-      : `${RUNTIME.checkIntervalMinutes}m`;
+      : 'AI-adaptive (1-15m)';
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(
-      `M R S Auto Blog listening on http://0.0.0.0:${PORT} (mode: ${IS_PROD ? 'production' : 'development'}, DB: ${getDbEngine()}, interval: ${cadenceLabel})`
+      `M R S Auto Blog listening on http://0.0.0.0:${PORT} (mode: ${IS_PROD ? 'production' : 'development'}, DB: ${getDbEngine()}, controller: AI autonomous, cadence: ${cadenceLabel})`
     );
 
-    // Run non-blocking hub sync & monitoring cycle on startup so updates/retries publish immediately without redeploy
-    startupTimer = setTimeout(() => {
-      runMonitoringCycle('startup').catch((err) => {
-        console.error('Initial startup monitoring error:', err);
-      });
-    }, 2000);
+    // Run non-blocking hub sync, monitoring, and AI self-healing maintenance immediately on startup
+    startupTimer = setTimeout(async () => {
+      try {
+        await runAutonomousCycle('startup');
+      } catch (err) {
+        console.error('Initial startup autonomous AI error:', err);
+      } finally {
+        void scheduleNextAdaptiveCycle();
+      }
+    }, 1500);
   });
 
-  let shuttingDown = false;
   const shutdown = (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -959,9 +1002,9 @@ ${urlsXml}
       clearInterval(intervalHandle);
       intervalHandle = null;
     }
-    if (cronTask) {
-      cronTask.stop();
-      cronTask = null;
+    if (adaptiveTimer) {
+      clearTimeout(adaptiveTimer);
+      adaptiveTimer = null;
     }
 
     for (const sseRes of activeSseClients) {

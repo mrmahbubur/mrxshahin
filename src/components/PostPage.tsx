@@ -147,7 +147,9 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+    if (typeof window !== 'undefined' && !window.location.hash) {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
 
     const fetchPost = (silent = false) => {
       fetch(`/api/posts/${encodeURIComponent(slug)}`, {
@@ -212,10 +214,19 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
 
   useEffect(() => {
     if (!loading && post && typeof window !== 'undefined' && window.location.hash) {
-      const targetId = window.location.hash.slice(1);
+      const raw = window.location.hash.slice(1);
+      let targetId = raw;
+      try {
+        targetId = decodeURIComponent(raw);
+      } catch {
+        targetId = raw;
+      }
       if (targetId) {
+        const behavior: ScrollBehavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth';
         requestAnimationFrame(() => {
-          document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          document.getElementById(targetId)?.scrollIntoView({ behavior, block: 'start' });
         });
       }
     }
@@ -391,8 +402,14 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
                       href={`#${entry.id}`}
                       onClick={(e) => {
                         e.preventDefault();
-                        window.history.replaceState(null, '', `#${entry.id}`);
-                        document.getElementById(entry.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        const nextHash = `#${entry.id}`;
+                        if (window.location.hash !== nextHash) {
+                          window.history.pushState(null, '', nextHash);
+                        }
+                        const behavior: ScrollBehavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+                          ? 'auto'
+                          : 'smooth';
+                        document.getElementById(entry.id)?.scrollIntoView({ behavior, block: 'start' });
                       }}
                       className="text-zinc-600 dark:text-zinc-400 hover:text-blue-700 dark:hover:text-blue-400 transition-colors leading-snug block"
                     >

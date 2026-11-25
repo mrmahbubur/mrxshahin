@@ -278,6 +278,14 @@ async function seedDefaultSettings(): Promise<void> {
   if (hubUrl === null) {
     await setSetting('hub_url', 'https://mrxshahin.ai.studio');
   }
+  const aiAutopilot = await getSetting('ai_autopilot_enabled');
+  if (aiAutopilot === null) {
+    await setSetting('ai_autopilot_enabled', 'true');
+  }
+  const aiInterval = await getSetting('ai_recommended_interval_minutes');
+  if (aiInterval === null) {
+    await setSetting('ai_recommended_interval_minutes', '1');
+  }
 }
 
 function safeJsonParse<T>(raw: string | null | undefined, fallback: T): T {
@@ -609,6 +617,41 @@ export async function updateSiteStatus(
       'UPDATE sites SET last_checked_at = ?, last_status = ?, last_error = ?, theme_color = COALESCE(?, theme_color) WHERE id = ?'
     )
     .run(ts, status, error, themeColor ?? null, id);
+}
+
+export async function updateSiteDiscoveredMetadata(
+  id: number,
+  discovered: {
+    rssUrl?: string | null;
+    sitemapUrl?: string | null;
+    githubRepo?: string | null;
+  }
+): Promise<void> {
+  const current = await getSiteById(id);
+  if (!current) return;
+
+  const nextRss = !current.rssUrl && discovered.rssUrl ? normalizeExternalUrl(discovered.rssUrl) : current.rssUrl;
+  const nextSitemap =
+    !current.sitemapUrl && discovered.sitemapUrl ? normalizeExternalUrl(discovered.sitemapUrl) : current.sitemapUrl;
+  const nextGithub = !current.githubRepo && discovered.githubRepo ? discovered.githubRepo.trim() : current.githubRepo;
+
+  if (nextRss === current.rssUrl && nextSitemap === current.sitemapUrl && nextGithub === current.githubRepo) {
+    return;
+  }
+
+  if (pgPool) {
+    await pgPool.query('UPDATE sites SET rss_url = $1, sitemap_url = $2, github_repo = $3 WHERE id = $4', [
+      nextRss,
+      nextSitemap,
+      nextGithub,
+      id,
+    ]);
+    return;
+  }
+
+  sqliteDb!
+    .prepare('UPDATE sites SET rss_url = ?, sitemap_url = ?, github_repo = ? WHERE id = ?')
+    .run(nextRss, nextSitemap, nextGithub, id);
 }
 
 export async function deleteSite(id: number): Promise<boolean> {
@@ -1269,6 +1312,25 @@ export async function listLogs(limit = 100, level?: string): Promise<LogRecord[]
   }
   const rows = sqliteDb!.prepare('SELECT * FROM logs ORDER BY id DESC LIMIT ?').all(safeLimit) as Record<string, unknown>[];
   return rows.map(mapLogRow);
+}
+
+export async function pruneOldLogs(keepCount = 500): Promise<number> {
+  const safeKeep = Math.max(100, keepCount);
+  if (pgPool) {
+    const res = await pgPool.query(
+      `DELETE FROM logs
+       WHERE id NOT IN (SELECT id FROM logs ORDER BY id DESC LIMIT $1)`,
+      [safeKeep]
+    );
+    return res.rowCount ?? 0;
+  }
+  const res = sqliteDb!
+    .prepare(
+      `DELETE FROM logs
+       WHERE id NOT IN (SELECT id FROM logs ORDER BY id DESC LIMIT ?)`
+    )
+    .run(safeKeep);
+  return res.changes;
 }
 
 export async function getAdminStats(): Promise<{

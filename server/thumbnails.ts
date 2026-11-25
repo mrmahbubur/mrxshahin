@@ -243,6 +243,8 @@ export async function buildFallbackThumbnailPng(
   }
 }
 
+let imageModelCooldownUntil = 0;
+
 export async function generatePostThumbnail(options: {
   title: string;
   siteName: string;
@@ -255,8 +257,8 @@ export async function generatePostThumbnail(options: {
   let usedAiImage = false;
   let fallbackReason: string | undefined;
 
-  // Tier 1: Gemini Image Generation
-  if (ai) {
+  // Tier 1: Gemini Image Generation (respects automatic cooldown after quota/permission error)
+  if (ai && Date.now() >= imageModelCooldownUntil) {
     try {
       const prompt = `Minimalist editorial background artwork representing the software and web theme of "${options.siteName}" and the update "${options.title}". Modern architectural shapes, clean light and shadow depth, subtle studio texture, rich muted color palette. Strictly no text, no letters, no words, no logos, no watermarks.`;
 
@@ -285,9 +287,15 @@ export async function generatePostThumbnail(options: {
       }
     } catch (err) {
       fallbackReason = err instanceof Error ? err.message : String(err);
+      const lower = fallbackReason.toLowerCase();
+      if (lower.includes('429') || lower.includes('quota') || lower.includes('403') || lower.includes('permission')) {
+        imageModelCooldownUntil = Date.now() + 15 * 60 * 1000;
+      }
     }
-  } else {
+  } else if (!ai) {
     fallbackReason = 'GEMINI_API_KEY not configured';
+  } else {
+    fallbackReason = 'AI image model in cooldown after quota/tier limit; using live OG/bespoke studio artwork';
   }
 
   // Tier 2: Source site's verified OG/hero image when AI image generation is unavailable

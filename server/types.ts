@@ -160,3 +160,27 @@ export interface LogRecord {
   details: string | null;
   createdAt: string;
 }
+
+export type AiDirectiveAction =
+  | 'sync_hub'
+  | 'retry_error_sites'
+  | 'heal_thumbnails'
+  | 'promote_ready_drafts'
+  | 'repair_post_metadata'
+  | 'prune_logs';
+
+export type AiSystemHealth = 'healthy' | 'degraded' | 'recovering';
+
+export interface AiControlStatus {
+  autopilotEnabled: boolean;
+  maintenanceRunning: boolean;
+  systemHealth: AiSystemHealth;
+  recommendedIntervalMinutes: number;
+  lastMaintenanceAt: string | null;
+  headlineDirective: string;
+  actionsExecuted: string[];
+  usedAiReasoning: boolean;
+  reasoningModel: string;
+  fallbackReason?: string | null;
+}
+
