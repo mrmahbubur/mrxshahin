@@ -21,13 +21,15 @@ function getArgValue(prefix: string): string | null {
 
 async function main(): Promise<void> {
   const seedIfEmpty = process.argv.includes('--seed-if-empty');
+  const syncPublic = process.argv.includes('--sync-public');
+  const outDirArg = getArgValue('--out-dir=') || 'dist';
   const rawSiteUrl =
     getArgValue('--site-url=') || process.env.SITE_URL || 'https://mrs-auto-blog.github.io';
   const baseUrl = rawSiteUrl.replace(/\/+$/, '');
 
-  const distDir = path.resolve(process.cwd(), 'dist');
-  if (!fs.existsSync(distDir)) {
-    throw new Error('dist/ directory not found. Run "npm run build" before exporting static files.');
+  const targetDir = path.resolve(process.cwd(), outDirArg);
+  if (!fs.existsSync(targetDir)) {
+    throw new Error(`${outDirArg}/ directory not found. Run Vite build before exporting static files.`);
   }
 
   await initDb();
@@ -49,12 +51,12 @@ async function main(): Promise<void> {
       listActiveAds(),
     ]);
 
-    const staticDataDir = path.join(distDir, 'static-data');
-    const thumbnailsDir = path.join(distDir, 'thumbnails');
+    const staticDataDir = path.join(targetDir, 'static-data');
+    const thumbnailsDir = path.join(targetDir, 'thumbnails');
     fs.mkdirSync(staticDataDir, { recursive: true });
     fs.mkdirSync(thumbnailsDir, { recursive: true });
 
-    const exportedPosts = posts.map((p) => ({
+    let exportedPosts = posts.map((p) => ({
       id: p.id,
       siteId: p.siteId,
       siteName: p.siteName,
@@ -74,15 +76,37 @@ async function main(): Promise<void> {
       createdAt: p.createdAt,
     }));
 
-    fs.writeFileSync(
-      path.join(staticDataDir, 'posts.json'),
-      JSON.stringify({
-        posts: exportedPosts,
-        categories,
-        exportedAt: new Date().toISOString(),
-      }),
-      'utf8'
-    );
+    let exportedCategories = categories;
+
+    // Preserve pre-bundled static snapshot in targetDir if live CI runners hit empty scrapes
+    const existingPostsFile = path.join(staticDataDir, 'posts.json');
+    if (exportedPosts.length === 0 && fs.existsSync(existingPostsFile)) {
+      try {
+        const prebuilt = JSON.parse(fs.readFileSync(existingPostsFile, 'utf8')) as {
+          posts?: typeof exportedPosts;
+          categories?: typeof exportedCategories;
+        };
+        if (Array.isArray(prebuilt.posts) && prebuilt.posts.length > 0) {
+          exportedPosts = prebuilt.posts;
+          if (Array.isArray(prebuilt.categories) && prebuilt.categories.length > 0) {
+            exportedCategories = prebuilt.categories;
+          }
+          console.log(`Preserved ${exportedPosts.length} pre-bundled static fallback post(s).`);
+        }
+      } catch {
+        // ignore invalid pre-existing JSON
+      }
+    } else {
+      fs.writeFileSync(
+        existingPostsFile,
+        JSON.stringify({
+          posts: exportedPosts,
+          categories: exportedCategories,
+          exportedAt: new Date().toISOString(),
+        }),
+        'utf8'
+      );
+    }
 
     const exportedAds = ads.map((ad) => ({
       id: ad.id,
@@ -133,8 +157,17 @@ async function main(): Promise<void> {
       }
     }
 
+    if (syncPublic) {
+      const publicDir = path.resolve(process.cwd(), 'public');
+      fs.mkdirSync(path.join(publicDir, 'static-data'), { recursive: true });
+      fs.mkdirSync(path.join(publicDir, 'thumbnails'), { recursive: true });
+      fs.cpSync(staticDataDir, path.join(publicDir, 'static-data'), { recursive: true, force: true });
+      fs.cpSync(thumbnailsDir, path.join(publicDir, 'thumbnails'), { recursive: true, force: true });
+      console.log(`Synced static snapshot + thumbnails into public/.`);
+    }
+
     // Export RSS 2.0 Feed
-    const rssItemsXml = posts
+    const rssItemsXml = exportedPosts
       .slice(0, 40)
       .map((post) => {
         const link = `${baseUrl}/post/${post.slug}`;
@@ -164,12 +197,12 @@ async function main(): Promise<void> {
 ${rssItemsXml}
   </channel>
 </rss>`;
-    fs.writeFileSync(path.join(distDir, 'rss.xml'), rssXml, 'utf8');
+    fs.writeFileSync(path.join(targetDir, 'rss.xml'), rssXml, 'utf8');
 
     // Export XML Sitemap
     const sitemapUrls = [
       `  <url>\n    <loc>${escapeXml(baseUrl)}/</loc>\n    <changefreq>hourly</changefreq>\n    <priority>1.0</priority>\n  </url>`,
-      ...posts.map(
+      ...exportedPosts.map(
         (p) =>
           `  <url>\n    <loc>${escapeXml(`${baseUrl}/post/${p.slug}`)}</loc>\n    <lastmod>${new Date(p.updatedAt).toISOString()}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
       ),
@@ -178,17 +211,17 @@ ${rssItemsXml}
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${sitemapUrls}
 </urlset>`;
-    fs.writeFileSync(path.join(distDir, 'sitemap.xml'), sitemapXml, 'utf8');
+    fs.writeFileSync(path.join(targetDir, 'sitemap.xml'), sitemapXml, 'utf8');
 
     // GitHub Pages SPA deep-link fallback & Jekyll bypass
-    const indexPath = path.join(distDir, 'index.html');
+    const indexPath = path.join(targetDir, 'index.html');
     if (fs.existsSync(indexPath)) {
-      fs.copyFileSync(indexPath, path.join(distDir, '404.html'));
+      fs.copyFileSync(indexPath, path.join(targetDir, '404.html'));
     }
-    fs.writeFileSync(path.join(distDir, '.nojekyll'), '', 'utf8');
+    fs.writeFileSync(path.join(targetDir, '.nojekyll'), '', 'utf8');
 
     console.log(
-      `Static export complete: ${exportedPosts.length} post(s), ${exportedAds.length} ad(s), thumbnails, rss.xml, sitemap.xml, 404.html, and .nojekyll written to dist/.`
+      `Static export complete: ${exportedPosts.length} post(s), ${exportedAds.length} ad(s), thumbnails, rss.xml, sitemap.xml, 404.html, and .nojekyll written to ${outDirArg}/.`
     );
   } finally {
     await closeDb();

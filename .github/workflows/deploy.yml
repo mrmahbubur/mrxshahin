@@ -44,7 +44,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx tsx scripts/export-static.ts --seed-if-empty --site-url="${{ steps.pages.outputs.origin }}${{ steps.pages.outputs.base_path }}"
+        run: npx tsx scripts/export-static.ts --out-dir=dist --seed-if-empty --site-url="${{ steps.pages.outputs.origin }}${{ steps.pages.outputs.base_path }}"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

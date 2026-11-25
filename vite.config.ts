@@ -14,6 +14,7 @@ function resolveViteBasePath(): string {
 
 export default defineConfig(() => {
   const base = resolveViteBasePath();
+  let resolvedOutDir = 'dist';
 
   return {
     base,
@@ -23,26 +24,39 @@ export default defineConfig(() => {
       {
         name: 'rewrite-html-base-links',
         transformIndexHtml(html) {
-          if (base === '/') return html;
-          const cleanBase = base === './' ? './' : base;
-          return html.replace('href="/rss.xml"', `href="${cleanBase}rss.xml"`);
+          let next = html;
+          if (base !== '/') {
+            const cleanBase = base === './' ? './' : base;
+            next = next.replace('href="/rss.xml"', `href="${cleanBase}rss.xml"`);
+          }
+          return next;
         },
       },
-      // Copies src/assets into dist/ so root-relative URLs like
+      {
+        name: 'strip-raw-gh-redirect-in-build',
+        apply: 'build',
+        transformIndexHtml(html) {
+          return html.replace(/<script\s+data-raw-gh-redirect>[\s\S]*?<\/script>\s*/gi, '');
+        },
+      },
+      // Copies src/assets into build outDir so root-relative URLs like
       // "/src/assets/images/..." (e.g. generate_image output) still resolve
       // in production builds. Do not remove.
       {
         name: 'copy-unbundled-src-assets',
         apply: 'build',
+        configResolved(config) {
+          resolvedOutDir = config.build.outDir || 'dist';
+        },
         closeBundle(error?: Error): void {
           if (error) {
             return;
           }
-          const distDir = path.resolve(__dirname, 'dist');
+          const outDir = path.resolve(__dirname, resolvedOutDir);
           const srcAssets = path.resolve(__dirname, 'src/assets');
-          const distAssets = path.resolve(distDir, 'src/assets');
-          if (fs.existsSync(distDir) && fs.existsSync(srcAssets)) {
-            fs.cpSync(srcAssets, distAssets, {recursive: true, force: true});
+          const outAssets = path.resolve(outDir, 'src/assets');
+          if (fs.existsSync(outDir) && fs.existsSync(srcAssets)) {
+            fs.cpSync(srcAssets, outAssets, {recursive: true, force: true});
           }
         },
       },

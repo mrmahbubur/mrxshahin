@@ -19,7 +19,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
-    "build:gh-pages": "vite build && tsx scripts/export-static.ts --seed-if-empty",
+    "build:gh-pages": "VITE_BASE_PATH=./ vite build --outDir docs && tsx scripts/export-static.ts --out-dir=docs --seed-if-empty",
     "start": "node server.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

@@ -1,6 +1,6 @@
 import { ArrowLeft, ArrowUpRight, Check, Copy, Share2 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
-import { fetchAdsWithFallback, fetchPostBySlugWithFallback, isStaticMode, withBase } from '../lib/paths';
+import { fetchAdsWithFallback, fetchPostBySlugWithFallback, isRelativeBase, isStaticMode, toRouteHref, withBase } from '../lib/paths';
 import type { FullPost, PublicAd, PublicPostSummary } from '../types';
 import { SponsoredAdUnit } from './SponsoredAdUnit';
 import { ThumbnailImage } from './ThumbnailImage';
@@ -292,7 +292,7 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
       {/* Blogger Breadcrumb Navigation */}
       <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
         <a
-          href={withBase('/')}
+          href={toRouteHref('/')}
           onClick={(e) => {
             e.preventDefault();
             onNavigate('/');
@@ -304,7 +304,7 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
         </a>
         <span aria-hidden="true">/</span>
         <a
-          href={withBase(`/category/${encodeURIComponent(post.category)}`)}
+          href={toRouteHref(`/category/${encodeURIComponent(post.category)}`)}
           onClick={(e) => {
             e.preventDefault();
             onNavigate(`/category/${encodeURIComponent(post.category)}`);
@@ -414,7 +414,7 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
                       onClick={(e) => {
                         e.preventDefault();
                         const nextHash = `#${entry.id}`;
-                        if (window.location.hash !== nextHash) {
+                        if (!isRelativeBase() && window.location.hash !== nextHash) {
                           window.history.pushState(null, '', nextHash);
                         }
                         const behavior: ScrollBehavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
@@ -490,7 +490,7 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
                 className="group rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822] overflow-hidden flex flex-col"
               >
                 <a
-                  href={withBase(`/post/${item.slug}`)}
+                  href={toRouteHref(`/post/${item.slug}`)}
                   onClick={(e) => {
                     e.preventDefault();
                     onNavigate(`/post/${item.slug}`);
@@ -515,7 +515,7 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
                   </div>
                   <h3 className="font-display text-base font-semibold leading-snug text-zinc-900 dark:text-zinc-100">
                     <a
-                      href={withBase(`/post/${item.slug}`)}
+                      href={toRouteHref(`/post/${item.slug}`)}
                       onClick={(e) => {
                         e.preventDefault();
                         onNavigate(`/post/${item.slug}`);

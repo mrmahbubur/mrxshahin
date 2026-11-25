@@ -1,6 +1,6 @@
 import { Menu, Moon, Sun, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { withBase } from '../lib/paths';
+import { toRouteHref, withBase } from '../lib/paths';
 
 interface HeaderProps {
   currentPath: string;
@@ -41,7 +41,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-8 px-4 sm:px-6 h-16">
         {/* Zone 1: Editorial Masthead */}
         <a
-          href={withBase('/')}
+          href={toRouteHref('/')}
           onClick={(e) => handleLinkClick(e, '/')}
           className="flex items-baseline gap-3 whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
         >
@@ -59,7 +59,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
         {/* Zone 2: Editorial Navigation */}
         <nav aria-label="Main navigation" className="hidden md:flex items-center gap-7 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           <a
-            href={withBase('/')}
+            href={toRouteHref('/')}
             aria-current={isHomeActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/')}
             className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 ${
@@ -71,7 +71,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             Dispatches
           </a>
           <a
-            href={withBase('/#labels')}
+            href={toRouteHref('/#labels')}
             aria-current={isLabelsActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/#labels')}
             className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 ${
@@ -83,7 +83,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             Labels
           </a>
           <a
-            href={withBase('/#archive')}
+            href={toRouteHref('/#archive')}
             onClick={(e) => handleLinkClick(e, '/#archive')}
             className="whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
           >
@@ -131,7 +131,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
           className="md:hidden border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-4 py-3 flex flex-col gap-1"
         >
           <a
-            href={withBase('/')}
+            href={toRouteHref('/')}
             aria-current={isHomeActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
@@ -139,7 +139,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             Dispatches
           </a>
           <a
-            href={withBase('/#labels')}
+            href={toRouteHref('/#labels')}
             aria-current={isLabelsActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/#labels')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
@@ -147,7 +147,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             Labels
           </a>
           <a
-            href={withBase('/#archive')}
+            href={toRouteHref('/#archive')}
             onClick={(e) => handleLinkClick(e, '/#archive')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
           >

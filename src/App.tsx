@@ -3,19 +3,14 @@ import { AdminPage } from './components/AdminPage';
 import { Header } from './components/Header';
 import { HomePage } from './components/HomePage';
 import { PostPage } from './components/PostPage';
-import { stripBase, withBase } from './lib/paths';
+import { getRouteFromWindow, isRelativeBase, toRouteHref, withBase } from './lib/paths';
 
 interface AdminWindow extends Window {
   __MRS_ADMIN_PATH__?: string;
 }
 
 function getLocationPathWithQuery(): { pathname: string; searchQuery: string } {
-  if (typeof window === 'undefined') return { pathname: '/', searchQuery: '' };
-  const params = new URLSearchParams(window.location.search);
-  return {
-    pathname: stripBase(window.location.pathname || '/'),
-    searchQuery: params.get('q') || '',
-  };
+  return getRouteFromWindow();
 }
 
 function getPreferredScrollBehavior(): ScrollBehavior {
@@ -114,13 +109,13 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.location.hash) {
+    if (typeof window !== 'undefined' && window.location.hash && !window.location.hash.startsWith('#/')) {
       scrollToHashTarget(window.location.hash);
     }
 
     const onPopState = () => {
       setLocationState(getLocationPathWithQuery());
-      if (window.location.hash) {
+      if (window.location.hash && !window.location.hash.startsWith('#/')) {
         scrollToHashTarget(window.location.hash);
       } else {
         cancelPendingHashScroll();
@@ -129,7 +124,7 @@ export default function App() {
 
     const onHashChange = () => {
       setLocationState(getLocationPathWithQuery());
-      if (window.location.hash) {
+      if (window.location.hash && !window.location.hash.startsWith('#/')) {
         scrollToHashTarget(window.location.hash);
       } else {
         cancelPendingHashScroll();
@@ -152,6 +147,26 @@ export default function App() {
       const pathAndQuery = hashIndex >= 0 ? nextPath.slice(0, hashIndex) : nextPath;
       const rawHash = hashIndex >= 0 ? nextPath.slice(hashIndex + 1) : '';
       const targetFull = pathAndQuery || '/';
+
+      if (isRelativeBase()) {
+        if (rawHash) {
+          if (window.location.hash.startsWith('#/') && window.location.hash !== '#/') {
+            window.history.pushState({}, '', '#/');
+            setLocationState(getLocationPathWithQuery());
+          }
+          scrollToHashTarget(rawHash);
+          return;
+        }
+        const nextHashUrl = `#${targetFull}`;
+        if (window.location.hash !== nextHashUrl) {
+          window.history.pushState({}, '', nextHashUrl);
+        }
+        setLocationState(getLocationPathWithQuery());
+        cancelPendingHashScroll();
+        window.scrollTo({ top: 0, behavior: getPreferredScrollBehavior() });
+        return;
+      }
+
       const nextRelativeWithHash = rawHash ? `${targetFull}#${rawHash}` : targetFull;
       const nextUrlWithHash = withBase(nextRelativeWithHash);
       const currentFull = window.location.pathname + window.location.search + window.location.hash;
@@ -235,7 +250,7 @@ export default function App() {
             <ul className="space-y-2">
               <li>
                 <a
-                  href={withBase('/')}
+                  href={toRouteHref('/')}
                   onClick={(e) => {
                     e.preventDefault();
                     navigate('/');
@@ -247,7 +262,7 @@ export default function App() {
               </li>
               <li>
                 <a
-                  href={withBase('/#labels')}
+                  href={toRouteHref('/#labels')}
                   onClick={(e) => {
                     e.preventDefault();
                     navigate('/#labels');
@@ -259,7 +274,7 @@ export default function App() {
               </li>
               <li>
                 <a
-                  href={withBase('/#archive')}
+                  href={toRouteHref('/#archive')}
                   onClick={(e) => {
                     e.preventDefault();
                     navigate('/#archive');

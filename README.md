@@ -94,15 +94,14 @@ An automated full-stack editorial blog platform that continuously monitors linke
 
 ## Deploying on GitHub Pages
 
-Because raw repository root `index.html` points to `/src/main.tsx` and GitHub Pages does not run a Node/Express server, deploying directly from a raw branch shows a blank page unless built through the included GitHub Actions workflow (`.github/workflows/deploy.yml`).
+M R S Auto Blog supports both GitHub Pages deployment modes out of the box:
 
-1. **Enable GitHub Actions Pages Deployment**
-   - In your GitHub repository, open **Settings → Pages**.
-   - Under **Build and deployment → Source**, select **GitHub Actions**.
+### Option A: GitHub Actions (Recommended)
+1. In your GitHub repository, open **Settings → Pages**.
+2. Under **Build and deployment → Source**, select **GitHub Actions**.
+3. Optionally add `GEMINI_API_KEY` (and `GITHUB_TOKEN`) under **Settings → Secrets and variables → Actions**.
+4. Push to `main` (or run **Actions → Deploy to GitHub Pages → Run workflow**). The workflow configures `VITE_BASE_PATH`, exports live dispatches, 16:9 PNG thumbnails, affiliate ads, `rss.xml`, `sitemap.xml`, `404.html`, and `.nojekyll` into `dist/`.
 
-2. **Optional Repository Secrets**
-   - Under **Settings → Secrets and variables → Actions**, optionally add `GEMINI_API_KEY` (and `GITHUB_TOKEN` if needed). Even without secrets, the workflow collects live updates from monitored sites and generates grounded dispatches, 16:9 PNG thumbnails, affiliate ads, `rss.xml`, `sitemap.xml`, `404.html`, and `.nojekyll` into `dist/`.
-
-3. **Run Deployment**
-   - Push to `main` (or run **Actions → Deploy to GitHub Pages → Run workflow**). The workflow configures the exact repository base path (`VITE_BASE_PATH`) automatically so CSS, JS, images, and nested `/post/<slug>` routes load cleanly without a blank page.
-
+### Option B: Deploy from a Branch (`main` → `/docs` or `/ (root)`)
+A pre-built static bundle with relative asset paths and hash routing is included in `docs/` (generated via `npm run build:gh-pages`).
+- Select **Deploy from a branch** → **`main`** → **`/docs`** in **Settings → Pages** (if **`/ (root)`** is selected, root `index.html` automatically redirects `.github.io` traffic to `./docs/`).

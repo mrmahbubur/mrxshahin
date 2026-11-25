@@ -3,6 +3,8 @@ import App from './App.tsx';
 import {ErrorBoundary} from './components/ErrorBoundary.tsx';
 import './index.css';
 
+(window as unknown as { __MRS_MOUNTED__?: boolean }).__MRS_MOUNTED__ = true;
+
 createRoot(document.getElementById('root')!).render(
   <ErrorBoundary>
     <App />

@@ -17,6 +17,10 @@ export function getBasePath(): string {
   return withLeading.endsWith('/') ? withLeading : `${withLeading}/`;
 }
 
+export function isRelativeBase(): boolean {
+  return getBasePath() === './';
+}
+
 export function withBase(appPath: string): string {
   if (!appPath) return getBasePath();
   if (/^(?:https?:|mailto:|tel:|data:)/i.test(appPath)) {
@@ -30,11 +34,25 @@ export function withBase(appPath: string): string {
   return `${base}${clean}`;
 }
 
+export function toRouteHref(appPath: string): string {
+  if (!isRelativeBase()) {
+    return withBase(appPath);
+  }
+  if (appPath.startsWith('/#')) {
+    return appPath.slice(1); // e.g. "#labels"
+  }
+  if (appPath.startsWith('#')) {
+    return appPath;
+  }
+  const clean = appPath.startsWith('/') ? appPath : `/${appPath}`;
+  return `#${clean}`;
+}
+
 export function stripBase(pathname: string): string {
   let clean = pathname || '/';
   const base = getBasePath();
   if (base !== '/' && base !== './') {
-    const trimmedBase = base.slice(0, -1); // remove trailing slash
+    const trimmedBase = base.slice(0, -1);
     if (clean === trimmedBase || clean === base) {
       clean = '/';
     } else if (clean.startsWith(base)) {
@@ -45,6 +63,39 @@ export function stripBase(pathname: string): string {
     clean = clean.slice(0, -'/index.html'.length) || '/';
   }
   return clean.startsWith('/') ? clean : `/${clean}`;
+}
+
+export function getRouteFromWindow(): { pathname: string; searchQuery: string } {
+  if (typeof window === 'undefined') return { pathname: '/', searchQuery: '' };
+
+  if (isRelativeBase() && window.location.hash.startsWith('#/')) {
+    const rawRoute = window.location.hash.slice(1);
+    const qIdx = rawRoute.indexOf('?');
+    const pathPart = qIdx >= 0 ? rawRoute.slice(0, qIdx) : rawRoute;
+    const queryPart = qIdx >= 0 ? rawRoute.slice(qIdx + 1) : '';
+    const params = new URLSearchParams(queryPart);
+    return {
+      pathname: pathPart || '/',
+      searchQuery: params.get('q') || '',
+    };
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return {
+    pathname: isRelativeBase() ? '/' : stripBase(window.location.pathname || '/'),
+    searchQuery: params.get('q') || '',
+  };
+}
+
+export function updateSearchInUrl(baseRoute: string, query: string): void {
+  if (typeof window === 'undefined') return;
+  const suffix = query ? `?q=${encodeURIComponent(query)}` : '';
+  const target = `${baseRoute}${suffix}`;
+  if (isRelativeBase()) {
+    window.history.replaceState({}, '', `#${target}`);
+    return;
+  }
+  window.history.replaceState({}, '', `${withBase(target)}${window.location.hash}`);
 }
 
 export function isStaticMode(): boolean {

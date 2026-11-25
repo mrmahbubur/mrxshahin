@@ -33,5 +33,21 @@
   <body class="bg-[#FAF9F6] text-zinc-900 dark:bg-[#0B0E14] dark:text-zinc-100 antialiased selection:bg-blue-600 selection:text-white">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script data-raw-gh-redirect>
+      (function () {
+        if (!window.location.hostname.endsWith('.github.io')) return;
+        setTimeout(function () {
+          if (window.__MRS_MOUNTED__) return;
+          fetch('./docs/index.html', { method: 'HEAD' })
+            .then(function (res) {
+              if (res.ok) {
+                var suffix = window.location.hash || '';
+                window.location.replace('./docs/' + suffix);
+              }
+            })
+            .catch(function () {});
+        }, 250);
+      })();
+    </script>
   </body>
 </html>

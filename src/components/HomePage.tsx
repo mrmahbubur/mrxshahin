@@ -1,6 +1,6 @@
 import { ArrowRight, ChevronLeft, ChevronRight, RefreshCw, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { fetchAdsWithFallback, fetchPostsWithFallback, isStaticMode, withBase } from '../lib/paths';
+import { fetchAdsWithFallback, fetchPostsWithFallback, isStaticMode, toRouteHref, updateSearchInUrl, withBase } from '../lib/paths';
 import type { CategoryCount, PublicAd, PublicPostSummary } from '../types';
 import { SponsoredAdUnit } from './SponsoredAdUnit';
 import { ThumbnailImage } from './ThumbnailImage';
@@ -207,8 +207,7 @@ export function HomePage({
             selectedCategory !== 'all'
               ? `/category/${encodeURIComponent(selectedCategory)}`
               : '/';
-          const nextUrl = trimmed ? `${base}?q=${encodeURIComponent(trimmed)}` : base;
-          window.history.replaceState({}, '', `${withBase(nextUrl)}${window.location.hash}`);
+          updateSearchInUrl(base, trimmed);
         }
       }
     }, 280);
@@ -250,7 +249,7 @@ export function HomePage({
       className="group flex flex-col rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822] overflow-hidden transition-colors hover:border-zinc-300 dark:hover:border-zinc-700"
     >
       <a
-        href={withBase(`/post/${post.slug}`)}
+        href={toRouteHref(`/post/${post.slug}`)}
         onClick={(e) => {
           e.preventDefault();
           onNavigate(`/post/${post.slug}`);
@@ -285,7 +284,7 @@ export function HomePage({
 
           <h2 className="font-display text-xl font-semibold leading-snug text-zinc-900 dark:text-zinc-50 [text-wrap:balance]">
             <a
-              href={withBase(`/post/${post.slug}`)}
+              href={toRouteHref(`/post/${post.slug}`)}
               onClick={(e) => {
                 e.preventDefault();
                 onNavigate(`/post/${post.slug}`);
@@ -303,7 +302,7 @@ export function HomePage({
 
         <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/80 text-xs">
           <a
-            href={withBase(`/post/${post.slug}`)}
+            href={toRouteHref(`/post/${post.slug}`)}
             onClick={(e) => {
               e.preventDefault();
               onNavigate(`/post/${post.slug}`);
@@ -349,7 +348,7 @@ export function HomePage({
         <section aria-label="Featured Dispatch" className="border-b border-zinc-200 dark:border-zinc-800 pb-12">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch">
             <a
-              href={withBase(`/post/${featuredPost.slug}`)}
+              href={toRouteHref(`/post/${featuredPost.slug}`)}
               onClick={(e) => {
                 e.preventDefault();
                 onNavigate(`/post/${featuredPost.slug}`);
@@ -386,7 +385,7 @@ export function HomePage({
 
                 <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 leading-[1.15] [text-wrap:balance]">
                   <a
-                    href={withBase(`/post/${featuredPost.slug}`)}
+                    href={toRouteHref(`/post/${featuredPost.slug}`)}
                     onClick={(e) => {
                       e.preventDefault();
                       onNavigate(`/post/${featuredPost.slug}`);
@@ -404,7 +403,7 @@ export function HomePage({
 
               <div className="pt-6">
                 <a
-                  href={withBase(`/post/${featuredPost.slug}`)}
+                  href={toRouteHref(`/post/${featuredPost.slug}`)}
                   onClick={(e) => {
                     e.preventDefault();
                     onNavigate(`/post/${featuredPost.slug}`);
@@ -631,7 +630,7 @@ export function HomePage({
                 {recentDispatches.map((item) => (
                   <article key={item.id} className="py-3.5 first:pt-0 last:pb-0 flex items-start gap-3.5 group">
                     <a
-                      href={withBase(`/post/${item.slug}`)}
+                      href={toRouteHref(`/post/${item.slug}`)}
                       onClick={(e) => {
                         e.preventDefault();
                         onNavigate(`/post/${item.slug}`);
@@ -648,7 +647,7 @@ export function HomePage({
                     <div className="min-w-0 space-y-1">
                       <h3 className="text-sm font-semibold leading-snug text-zinc-900 dark:text-zinc-100 line-clamp-2">
                         <a
-                          href={withBase(`/post/${item.slug}`)}
+                          href={toRouteHref(`/post/${item.slug}`)}
                           onClick={(e) => {
                             e.preventDefault();
                             onNavigate(`/post/${item.slug}`);
