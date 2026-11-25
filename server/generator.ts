@@ -46,27 +46,46 @@ function estimateReadingTime(html: string): number {
   return Math.max(1, Math.ceil(words / 220));
 }
 
-function buildGenerationPrompt(report: ChangeReport): string {
-  return `You are the senior technical editor for M R S Auto Blog.
-Write an accurate, factual, engaging editorial blog post covering the following real website monitoring report.
+function resolveEditorialCategory(siteName: string, report?: ChangeReport): string {
+  const hay = `${siteName} ${report?.currentTitle || ''} ${report?.reason || ''}`.toLowerCase();
+  if (/\biptv\b|channel|streaming|live tv/.test(hay) && !/\bapk\b/.test(hay)) {
+    return 'Channels & Streaming';
+  }
+  if (/\bapps?\s*store\b|\bapk\b|private\s*c\s*n|pcn|download/.test(hay)) {
+    return 'Apps & Software';
+  }
+  if (/\bblogger\b|tech blog|mrxshahin\.blogspot|how to\b|troubleshooting|guides\b/.test(hay) || siteName.toLowerCase() === 'mrxshahin') {
+    return 'Blogs & Guides';
+  }
+  if (/camellia\s*ai|avatar|assistant|concierge|\bai\b/.test(hay)) {
+    return 'AI & New Features';
+  }
+  if (/charity|foundation|shop|e-commerce|catalog/.test(hay)) {
+    return 'Shop & Community';
+  }
+  return 'Services & Platforms';
+}
 
-CRITICAL FACTUALITY RULES:
-1. ONLY use facts explicitly present in the MONITORING DATA below.
-2. NEVER invent features, statistics, benchmarks, user counts, dates, version numbers, or quotes not present in the data.
-3. If the available change data is concise or thin, write a focused, crisp post rather than padding with speculation.
-4. When rich data is available, aim for 800 to 1,400 words in clean semantic HTML.
+function buildGenerationPrompt(report: ChangeReport): string {
+  return `You are the senior technical & product editor for M R S Auto Blog.
+Write an engaging, reader-friendly editorial article covering the new features, blog posts, apps, channels, services, or releases observed on the destination below.
+
+CRITICAL EDITORIAL & FACTUALITY RULES:
+1. FOCUS ONLY ON USER-FACING VALUE: new features, inventions, blog guides, apps/APKs, streaming channels, products, and services.
+2. NEVER write systemic developer plumbing posts (no Vite/Webpack/esbuild conflicts, dependency bumps, CI workflows, CSS refactors, or robotic telemetry like "3 new section heading(s)" or "similarity 14.6%").
+3. ONLY use facts explicitly present in the MONITORING DATA below. NEVER invent features, numbers, dates, or quotes.
+4. When rich data is available, aim for 700 to 1,300 words in clean semantic HTML.
 
 REQUIRED HTML STRUCTURE (inside contentHtml):
 - Use clean semantic HTML tags only: <h2>, <h3>, <p>, <ul>, <ol>, <li>, <blockquote>, <a href="...">, <strong>, <em>, <code>.
 - Do NOT include an <h1> tag in contentHtml (the post page renders the H1 title separately).
 - Include these clear sections as <h2> headings:
-  1. Introduction (what changed or launched)
-  2. What's New (concrete updates from the report)
-  3. How It Works & Key Highlights (grounded in observed headings, navigation, pages, RSS items, or commits)
-  4. Why It Matters (practical impact for visitors/users based strictly on observed capabilities)
-  ${report.isInitial ? '' : '5. Before vs. After (concise comparison using only the beforeSummary and afterSummary provided)'}
-  6. Visit the Site (include a clear link <a href="${report.siteUrl}">${report.siteName}</a>)
-  7. Conclusion (brief wrap-up)
+  1. Overview (what launched or what readers/users can explore right now)
+  2. New Features, Channels, Apps & Highlights (concrete capabilities and releases from the report)
+  3. Latest Guides, Offerings & Highlights (grounded in observed feeds, apps, channels, or sections)
+  4. Why It Matters for Users (practical benefits based strictly on observed features)
+  5. Visit the Site (include a clear link <a href="${report.siteUrl}">${report.siteName}</a>)
+  6. Summary (brief editorial wrap-up)
 
 MONITORING DATA:
 ${JSON.stringify(
@@ -192,18 +211,22 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
         : report.siteName.length > 28 && pageTitle.length >= 24
           ? `${pageTitle} · ${report.siteName}`
           : `${report.siteName}: ${pageTitle}`
-    : `${report.siteName} Update: ${report.reason}`;
+    : report.newRssItems[0]?.title
+      ? `${report.siteName}: ${report.newRssItems[0].title}`
+      : report.newHeadings[0]
+        ? `${report.siteName}: ${report.newHeadings[0]} & Featured Highlights`
+        : `${report.siteName}: ${pageTitle} — Latest Features & Updates`;
   const rawTitle = truncateAtWordBoundary(combinedHeadline, 96);
   const title = rawTitle.length >= 16 ? rawTitle : `${report.siteName}: ${pageTitle}`;
 
-  const slug = slugify(`${report.siteName}-${report.isInitial ? 'innovations' : 'update'}`);
+  const slug = slugify(`${report.siteName}-${report.isInitial ? 'spotlight' : 'features-update'}`);
   const summarySentences = [
     report.isInitial
-      ? `${report.siteName} is live at ${report.siteUrl} featuring “${pageTitle}”.`
-      : `Real-time monitoring captured a live update on ${report.siteName}: ${report.reason}.`,
+      ? `${report.siteName} brings together ${pageTitle} at ${report.siteUrl}.`
+      : `Explore the latest features, releases, and updates now live on ${report.siteName}: ${report.reason}.`,
     pageDesc.length > 20
       ? truncateAtWordBoundary(pageDesc, 175).replace(/[.!?\s]+$/, '') + '.'
-      : `Explore the verified capabilities, active links, and technical updates observed on ${report.siteName}.`,
+      : `Discover verified apps, channels, guides, and tools available directly on ${report.siteName}.`,
   ];
   const summary = summarySentences.join(' ').slice(0, 280);
   const metaDescription = truncateAtWordBoundary(`${report.siteName} — ${pageDesc}`, 158);
@@ -307,8 +330,8 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
       .join('\n      ');
     structureSectionHtml = `
     ${navLine}
-    ${headingItems ? `<h3>Key Sections &amp; Headlines Indexed</h3><ul>\n      ${headingItems}\n    </ul>` : ''}
-    ${pageItems ? `<h3>Indexed Pages in Sitemap</h3><ul>\n      ${pageItems}\n    </ul>` : ''}`;
+    ${headingItems ? `<h3>Highlights &amp; Available Sections</h3><ul>\n      ${headingItems}\n    </ul>` : ''}
+    ${pageItems ? `<h3>Featured Pages &amp; Sections</h3><ul>\n      ${pageItems}\n    </ul>` : ''}`;
   }
 
   // Linked Destinations discovered on the page
@@ -317,7 +340,7 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
     .slice(0, 8);
   const linkedResourcesHtml =
     externalLinks.length > 0
-      ? `<h3>Featured Links &amp; Ecosystem Connections</h3>
+      ? `<h3>Quick Links &amp; Related Resources</h3>
     <ul>
       ${externalLinks
         .map((l) => `<li><a href="${escapeHtmlText(l.href)}">${escapeHtmlText(l.text)}</a></li>`)
@@ -331,55 +354,44 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
       ? `<blockquote><p>${escapeHtmlText(excerptClean)}${report.currentMainTextExcerpt.length > 480 ? '…' : ''}</p></blockquote>`
       : '';
 
-  const beforeAfterHtml = report.isInitial
-    ? ''
-    : `
-    <h2>Before vs. After</h2>
-    <ul>
-      <li><strong>Previous Baseline:</strong> ${escapeHtmlText(report.beforeSummary || 'Prior snapshot index')}</li>
-      <li><strong>Latest Observed State:</strong> ${escapeHtmlText(report.afterSummary || pageTitle)}</li>
-      ${report.textDiffSnippet ? `<li><strong>Changed Copy Highlight:</strong> ${escapeHtmlText(truncateAtWordBoundary(report.textDiffSnippet, 320))}</li>` : ''}
-    </ul>`;
-
   const rawHtml = `
-    <h2>Introduction</h2>
+    <h2>Overview</h2>
     <p>${
       report.isInitial
-        ? `Real-time inspection of <strong>${siteNameEsc}</strong> (<a href="${siteUrlEsc}">${siteUrlEsc}</a>) indexed its live destination under the title <strong>${escapeHtmlText(pageTitle)}</strong>. Below is a verified breakdown of every innovation, technical feature, feed release, and structural highlight observed directly from the live site.`
-        : `Continuous real-time monitoring detected an active update on <strong>${siteNameEsc}</strong> (<a href="${siteUrlEsc}">${siteUrlEsc}</a>): <strong>${escapeHtmlText(report.reason)}</strong>.`
+        ? `<strong>${siteNameEsc}</strong> (<a href="${siteUrlEsc}">${siteUrlEsc}</a>) is live with <strong>${escapeHtmlText(pageTitle)}</strong>. Below is a clear walkthrough of its newest features, apps, channels, guides, and offerings available right now.`
+        : `New user-facing updates are now live on <strong>${siteNameEsc}</strong> (<a href="${siteUrlEsc}">${siteUrlEsc}</a>): <strong>${escapeHtmlText(report.reason)}</strong>.`
     }</p>
 
-    <h2>Core Innovations &amp; Real Capabilities</h2>
+    <h2>Features, Channels &amp; Highlights</h2>
     ${innovationListHtml}
     ${excerptHtml}
 
-    <h2>What's New &amp; Live Activity</h2>
-    ${rssSectionHtml || githubSectionHtml ? `${rssSectionHtml}${githubSectionHtml}` : `<p>Live verification recorded active metadata for <strong>${escapeHtmlText(pageTitle)}</strong>: ${escapeHtmlText(pageDesc)}</p>`}
+    <h2>Latest Releases, Posts &amp; Additions</h2>
+    ${rssSectionHtml || githubSectionHtml ? `${rssSectionHtml}${githubSectionHtml}` : `<p>Featured experience on <strong>${escapeHtmlText(pageTitle)}</strong>: ${escapeHtmlText(pageDesc)}</p>`}
 
-    <h2>How It Works &amp; Platform Structure</h2>
+    <h2>What You Can Explore</h2>
     ${structureSectionHtml || `<p>${escapeHtmlText(pageDesc)}</p>`}
     ${linkedResourcesHtml}
 
     <h2>Why It Matters</h2>
-    <p>Every detail documented here reflects live production output from ${siteNameEsc} rather than static assumptions. Tracking structural metadata, RSS syndication, sitemap additions, and source repository activity in real time keeps readers informed the moment new tools, guides, or platform improvements launch.</p>
+    <p>From interactive apps and live streaming channels to step-by-step tech guides and digital services, ${siteNameEsc} delivers practical tools built directly for everyday visitors and users.</p>
 
-    ${beforeAfterHtml}
+    <h2>Visit ${siteNameEsc}</h2>
+    <p>Try the latest features, apps, channels, and updates directly at <a href="${siteUrlEsc}">${siteNameEsc}</a>.</p>
 
-    <h2>Visit the Site</h2>
-    <p>Explore the live platform and its latest innovations directly at <a href="${siteUrlEsc}">${siteNameEsc}</a>.</p>
-
-    <h2>Conclusion</h2>
-    <p>M R S Auto Blog continues monitoring ${siteNameEsc} automatically so every verified innovation, release, and content update is published to the live feed in real time.</p>
+    <h2>Summary</h2>
+    <p>M R S Auto Blog continuously tracks new features, blog posts, apps, and channels across ${siteNameEsc} so readers stay up to date as new experiences go live.</p>
   `;
 
+  const category = resolveEditorialCategory(report.siteName, report);
   const tags = Array.from(
     new Set(
       [
         slugify(report.siteName),
-        report.isInitial ? 'innovations' : 'live-update',
-        report.newGithubReleases.length > 0 || report.newGithubCommits.length > 0 ? 'github' : '',
-        report.newRssItems.length > 0 ? 'articles' : '',
-        'web-monitoring',
+        slugify(category),
+        report.isInitial ? 'featured' : 'new-features',
+        report.newRssItems.length > 0 ? 'blogs' : '',
+        'releases',
       ].filter(Boolean)
     )
   ).slice(0, 5);
@@ -575,7 +587,7 @@ export async function generateAndSavePostFromReport(report: ChangeReport): Promi
     summary: article.summary,
     contentHtml: article.contentHtml,
     tags: article.tags,
-    category: report.siteName,
+    category: resolveEditorialCategory(report.siteName, report),
     changeHash: report.changeHash,
     changeReport: report,
     status,

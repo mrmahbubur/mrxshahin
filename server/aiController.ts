@@ -175,13 +175,7 @@ async function evaluateSystemWithAi(telemetry: {
         : 'recovering'
       : 'healthy';
 
-  const deterministicInterval =
-    telemetry.errorSites > 0 ||
-    telemetry.pendingSites > 0 ||
-    telemetry.uncoveredActiveSites > 0 ||
-    telemetry.publishedPosts === 0
-      ? 1
-      : 2;
+  const deterministicInterval = 1;
 
   const deterministicDirective =
     deterministicHealth === 'healthy'
@@ -407,7 +401,7 @@ export async function runAiMaintenanceAndControl(
           new Map(
             [...errorSitesList, ...pendingSitesList, ...uncoveredActiveSites].map((s) => [s.id, s])
           ).values()
-        ).slice(0, 4);
+        ).slice(0, 15);
 
         let recovered = 0;
         let published = 0;

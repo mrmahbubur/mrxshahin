@@ -151,6 +151,7 @@ export function HomePage({
         const payload = JSON.parse(ev.data) as { post?: PublicPostSummary };
         const incoming = payload.post;
         if (incoming) {
+          setTotalPosts((prev) => prev + 1);
           setRecentDispatches((prev) => {
             if (prev.some((p) => p.id === incoming.id)) return prev;
             return [incoming, ...prev].slice(0, 5);
@@ -177,6 +178,7 @@ export function HomePage({
       try {
         const payload = JSON.parse(ev.data) as { id?: number };
         if (typeof payload.id === 'number') {
+          setTotalPosts((prev) => Math.max(0, prev - 1));
           setPosts((prev) => prev.filter((p) => p.id !== payload.id));
           setRecentDispatches((prev) => prev.filter((p) => p.id !== payload.id));
         }
@@ -190,7 +192,14 @@ export function HomePage({
     source.addEventListener('post:updated', handleUpdated as EventListener);
     source.addEventListener('post:deleted', handleDeleted as EventListener);
 
+    const syncTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadData({ silent: true });
+      }
+    }, 45_000);
+
     return () => {
+      clearInterval(syncTimer);
       source.close();
     };
   }, [loadData, selectedCategory, activeSearch, page]);

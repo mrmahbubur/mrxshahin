@@ -54,6 +54,23 @@ const IGNORED_HUB_DOMAINS = new Set([
   'unpkg.com',
   'w3.org',
   'schema.org',
+  'uplcm.com',
+  's0.wp.com',
+  's.wordpress.com',
+  'api.microlink.io',
+  'www.google.com',
+  'google.com',
+  'mail.google.com',
+  'calendly.com',
+  'goodreads.com',
+  'www.goodreads.com',
+  'react.dev',
+  'vite.dev',
+  'vitejs.dev',
+  'developer.mozilla.org',
+  'npmjs.com',
+  'www.npmjs.com',
+  'cloudflare.com',
 ]);
 
 let checkInProgress = false;
@@ -461,6 +478,120 @@ function extractPageSignals(html: string, baseUrl: string): {
   };
 }
 
+function isReadableSpaSentence(raw: string): boolean {
+  const s = raw.replace(/\s+/g, ' ').trim();
+  if (s.length < 18 || s.length > 360) return false;
+  if (/^https?:\/\//i.test(s) || /^[\w./:-]+$/.test(s)) return false;
+  if (/[{}[\];=<>]/.test(s)) return false;
+  const words = s.split(/\s+/);
+  if (words.length < 3) return false;
+  return /[a-zA-Z]{3,}/.test(s);
+}
+
+async function enrichSpaSignals(
+  html: string,
+  canonicalPageUrl: string,
+  signals: ReturnType<typeof extractPageSignals>
+): Promise<void> {
+  if (signals.mainText.length >= 450 && signals.headings.length >= 3) {
+    return;
+  }
+
+  const $ = cheerio.load(html);
+  const pageHost = new URL(canonicalPageUrl).hostname.toLowerCase();
+  const extraParagraphs: string[] = [];
+  const extraHeadings: string[] = [];
+
+  // 1. Inspect Web App Manifest for official app description & shortcuts
+  const manifestHref = $('link[rel="manifest"]').attr('href') || '/manifest.webmanifest';
+  try {
+    const manifestUrl = normalizeUrl(new URL(manifestHref, canonicalPageUrl).toString());
+    if (new URL(manifestUrl).hostname.toLowerCase() === pageHost) {
+      const mRes = await safeFetchText(manifestUrl, {
+        timeoutMs: 7000,
+        retries: 0,
+        maxBytes: 150_000,
+        cacheBust: true,
+      });
+      const manifest = JSON.parse(mRes.text) as {
+        name?: string;
+        description?: string;
+        shortcuts?: Array<{ name?: string; description?: string }>;
+      };
+      if (manifest.description && isReadableSpaSentence(manifest.description)) {
+        extraParagraphs.push(manifest.description);
+      }
+      if (Array.isArray(manifest.shortcuts)) {
+        for (const sc of manifest.shortcuts.slice(0, 8)) {
+          if (sc.name && sc.name.trim().length >= 3) extraHeadings.push(sc.name.trim());
+          if (sc.description && isReadableSpaSentence(sc.description)) extraParagraphs.push(sc.description);
+        }
+      }
+    }
+  } catch {
+    // ignore missing or unparseable manifest
+  }
+
+  // 2. Inspect module script bundle(s) if static HTML was a minimal SPA shell
+  if (signals.mainText.length < 350) {
+    const scriptUrls: string[] = [];
+    $('script[type="module"][src]').each((_, el) => {
+      const src = $(el).attr('src');
+      if (!src) return;
+      try {
+        const abs = normalizeUrl(new URL(src, canonicalPageUrl).toString());
+        if (new URL(abs).hostname.toLowerCase() === pageHost && !scriptUrls.includes(abs)) {
+          scriptUrls.push(abs);
+        }
+      } catch {
+        // ignore invalid script src
+      }
+    });
+
+    for (const scriptUrl of scriptUrls.slice(0, 2)) {
+      try {
+        const jsRes = await safeFetchText(scriptUrl, {
+          timeoutMs: 12000,
+          retries: 0,
+          maxBytes: 1_500_000,
+          cacheBust: true,
+        });
+        const jsText = jsRes.text;
+
+        const fieldRe =
+          /(?:title|headline|subtitle|description|summary|tagline|speechNarrative|label)\s*:\s*"([^"\\]{6,320})"/g;
+        let m: RegExpExecArray | null;
+        while ((m = fieldRe.exec(jsText)) !== null && extraParagraphs.length < 24) {
+          const val = m[1].replace(/\s+/g, ' ').trim();
+          if (/^(title|description|summary|label|placeholder|loading)/i.test(val)) continue;
+          if (val.length <= 75 && /^[A-Za-z0-9\s&/+\-–—:.]+$/.test(val) && val.split(/\s+/).length >= 2) {
+            if (!extraHeadings.includes(val)) extraHeadings.push(val);
+          } else if (isReadableSpaSentence(val)) {
+            extraParagraphs.push(val);
+          }
+        }
+      } catch {
+        // ignore unreachable or oversized SPA bundle
+      }
+    }
+  }
+
+  const existingHeadingSet = new Set(signals.headings.map((h) => h.text.toLowerCase()));
+  for (const h of extraHeadings.slice(0, 14)) {
+    if (!existingHeadingSet.has(h.toLowerCase())) {
+      existingHeadingSet.add(h.toLowerCase());
+      signals.headings.push({ level: 'h2', text: h });
+    }
+  }
+
+  const dedupedCopy = Array.from(new Set(extraParagraphs.map((p) => p.trim()).filter(Boolean))).join('. ');
+  if (dedupedCopy) {
+    signals.mainText = normalizeTextForDiff(
+      signals.mainText ? `${signals.mainText}. ${dedupedCopy}` : dedupedCopy
+    ).slice(0, 30000);
+  }
+}
+
 function inferGithubRepoFromUrl(rawUrl: string): string | null {
   try {
     const parsed = new URL(rawUrl);
@@ -730,12 +861,37 @@ function tokenJaccardSimilarity(a: string, b: string): number {
   return union === 0 ? 1 : intersection / union;
 }
 
+function isSystemicCommitMessage(message: string): boolean {
+  const lower = message.trim().toLowerCase();
+  if (!lower) return true;
+  if (/^(chore|ci|build|deps|refactor|style|lint|test|docs)(\([^)]*\))?:/.test(lower)) {
+    return true;
+  }
+  if (/^merge (pull request|branch|remote-tracking)/i.test(lower)) {
+    return true;
+  }
+  return /\b(vite|esbuild|webpack|tsconfig|package-lock|bun\.lock|package\.json|lockfile|eslint|prettier|dependabot|github actions|workflow|bump\b|dependency|dependencies|peer dependency|conflict|manifest\.json|favicon|robots\.txt|sitemap\.xml|typo|formatting|cleanup|dead code|boilerplate|scaffold)\b/i.test(
+    lower
+  );
+}
+
+function isSystemicPagePath(rawUrl: string): boolean {
+  const lower = rawUrl.toLowerCase();
+  return /\/(manifest|sitemap|robots|feed|rss|favicon|sw\.js|service-worker|workbox|assets\/|static-data\/|\.well-known\/)/.test(
+    lower
+  );
+}
+
 function buildChangeReport(
   site: SiteRecord,
   previous: SnapshotRecord | null,
   current: Omit<SnapshotRecord, 'id' | 'createdAt'>,
   siteHasAnyPosts: boolean
 ): ChangeReport {
+  const userFacingInitialCommits = (current.githubData?.commits ?? []).filter(
+    (c) => !isSystemicCommitMessage(c.message)
+  );
+
   if (!previous) {
     const wordCount = current.mainText.split(/\s+/).filter(Boolean).length;
     const hasSubstance =
@@ -743,7 +899,7 @@ function buildChangeReport(
       (current.metaDescription.length >= 20 && current.title.length >= 4) ||
       current.headings.length >= 2 ||
       current.rssItems.length > 0 ||
-      (current.githubData?.commits.length ?? 0) > 0 ||
+      userFacingInitialCommits.length > 0 ||
       (current.githubData?.releases.length ?? 0) > 0;
 
     const meaningful = !siteHasAnyPosts && hasSubstance;
@@ -759,17 +915,17 @@ function buildChangeReport(
       isInitial: true,
       meaningful,
       reason: meaningful
-        ? `Initial site discovery and baseline index for ${site.name}`
-        : 'Initial baseline snapshot stored (insufficient public text for standalone article)',
+        ? `Featured launch & capabilities on ${site.name}`
+        : 'Initial snapshot stored (awaiting richer public features or content)',
       changeHash,
-      newPages: current.sitemapUrls.slice(0, 20),
+      newPages: current.sitemapUrls.filter((u) => !isSystemicPagePath(u)).slice(0, 20),
       removedPages: [],
       newHeadings: current.headings.map((h) => h.text).slice(0, 20),
       removedHeadings: [],
       newNavItems: current.navItems,
       newLinks: current.links.slice(0, 20),
       newRssItems: current.rssItems.slice(0, 10),
-      newGithubCommits: current.githubData?.commits ?? [],
+      newGithubCommits: userFacingInitialCommits,
       newGithubReleases: current.githubData?.releases ?? [],
       beforeSummary: '',
       afterSummary: current.metaDescription || current.title,
@@ -783,13 +939,14 @@ function buildChangeReport(
   }
 
   const prevSitemaps = new Set(previous.sitemapUrls);
-  const currSitemaps = new Set(current.sitemapUrls);
-  const newPages = current.sitemapUrls.filter((u) => !prevSitemaps.has(u));
-  const removedPages = previous.sitemapUrls.filter((u) => !currSitemaps.has(u));
+  const newPages = current.sitemapUrls.filter((u) => !prevSitemaps.has(u) && !isSystemicPagePath(u));
+  const removedPages: string[] = [];
 
   const prevHeadings = new Set(previous.headings.map((h) => h.text));
   const currHeadings = new Set(current.headings.map((h) => h.text));
-  const newHeadings = current.headings.map((h) => h.text).filter((t) => !prevHeadings.has(t));
+  const newHeadings = current.headings
+    .map((h) => h.text)
+    .filter((t) => !prevHeadings.has(t) && t.length >= 6);
   const removedHeadings = previous.headings.map((h) => h.text).filter((t) => !currHeadings.has(t));
 
   const prevNav = new Set(previous.navItems);
@@ -801,45 +958,72 @@ function buildChangeReport(
   const prevRssKeys = new Set(previous.rssItems.map((r) => `${r.title}|${r.link}`));
   const newRssItems = current.rssItems.filter((r) => !prevRssKeys.has(`${r.title}|${r.link}`));
 
+  const hadGithubHistory = Boolean(previous.githubData);
   const prevCommitShas = new Set(previous.githubData?.commits.map((c) => c.sha) ?? []);
-  const newGithubCommits = (current.githubData?.commits ?? []).filter((c) => !prevCommitShas.has(c.sha));
+  const newGithubCommits = hadGithubHistory
+    ? (current.githubData?.commits ?? []).filter(
+        (c) => !prevCommitShas.has(c.sha) && !isSystemicCommitMessage(c.message)
+      )
+    : [];
 
   const prevReleaseTags = new Set(previous.githubData?.releases.map((r) => r.tagName) ?? []);
-  const newGithubReleases = (current.githubData?.releases ?? []).filter((r) => !prevReleaseTags.has(r.tagName));
+  const newGithubReleases = hadGithubHistory
+    ? (current.githubData?.releases ?? []).filter((r) => !prevReleaseTags.has(r.tagName))
+    : [];
 
   const textSimilarity = tokenJaccardSimilarity(previous.mainText, current.mainText);
   const titleChanged = previous.title !== current.title && current.title.length > 0;
   const metaChanged = previous.metaDescription !== current.metaDescription && current.metaDescription.length > 0;
 
-  // Meaningful change criteria (ignores trivial timestamp/whitespace/ad changes)
-  const significantTextShift = textSimilarity < 0.92 && Math.abs(current.mainText.length - previous.mainText.length) > 120;
+  // Meaningful user-facing update criteria (ignores systemic refactors, build commits, and trivial copy shifts)
+  const significantTextShift =
+    textSimilarity < 0.85 && Math.abs(current.mainText.length - previous.mainText.length) > 180;
   const meaningful =
-    newPages.length > 0 ||
-    removedPages.length > 0 ||
-    newHeadings.length > 0 ||
-    newNavItems.length > 0 ||
     newRssItems.length > 0 ||
-    newGithubCommits.length > 0 ||
     newGithubReleases.length > 0 ||
+    newGithubCommits.length > 0 ||
+    newPages.length > 0 ||
+    newHeadings.length >= 2 ||
+    newNavItems.length >= 2 ||
     titleChanged ||
     metaChanged ||
     significantTextShift;
 
   const reasons: string[] = [];
-  if (newPages.length > 0) reasons.push(`${newPages.length} new page(s) in sitemap`);
-  if (removedPages.length > 0) reasons.push(`${removedPages.length} removed page(s)`);
-  if (newHeadings.length > 0) reasons.push(`${newHeadings.length} new section heading(s)`);
-  if (newNavItems.length > 0) reasons.push(`${newNavItems.length} new navigation item(s)`);
-  if (newRssItems.length > 0) reasons.push(`${newRssItems.length} new RSS item(s)`);
-  if (newGithubReleases.length > 0) reasons.push(`${newGithubReleases.length} new GitHub release(s)`);
-  if (newGithubCommits.length > 0) reasons.push(`${newGithubCommits.length} new GitHub commit(s)`);
-  if (titleChanged) reasons.push('Page title updated');
-  if (metaChanged) reasons.push('Meta description updated');
-  if (significantTextShift) reasons.push(`Substantial copy change (similarity ${(textSimilarity * 100).toFixed(1)}%)`);
+  if (newRssItems.length > 0) {
+    reasons.push(
+      newRssItems.length === 1
+        ? `New blog article: ${newRssItems[0].title}`
+        : `${newRssItems.length} new blog articles & feed updates`
+    );
+  }
+  if (newGithubReleases.length > 0) {
+    reasons.push(`New release ${newGithubReleases[0].tagName}: ${newGithubReleases[0].name}`);
+  }
+  if (newHeadings.length >= 2) {
+    reasons.push(`New features & highlights: ${newHeadings.slice(0, 2).join(' · ')}`);
+  }
+  if (newPages.length > 0) {
+    reasons.push(
+      newPages.length === 1
+        ? `New destination launched on ${site.name}`
+        : `${newPages.length} new sections launched on ${site.name}`
+    );
+  }
+  if (newNavItems.length >= 2) {
+    reasons.push(`New sections added: ${newNavItems.slice(0, 3).join(', ')}`);
+  }
+  if (newGithubCommits.length > 0) {
+    reasons.push(`New feature update: ${newGithubCommits[0].message}`);
+  }
+  if (titleChanged) reasons.push(`Updated spotlight: ${current.title}`);
+  if (metaChanged) reasons.push('Updated product & feature overview');
+  if (significantTextShift && reasons.length === 0) {
+    reasons.push(`Expanded features, content, and capabilities on ${site.name}`);
+  }
 
   const changeSignature = JSON.stringify({
     newPages: newPages.slice(0, 10),
-    removedPages: removedPages.slice(0, 10),
     newHeadings: newHeadings.slice(0, 10),
     newRssItems: newRssItems.map((r) => r.title).slice(0, 5),
     newGithubCommits: newGithubCommits.map((c) => c.sha).slice(0, 5),
@@ -864,7 +1048,7 @@ function buildChangeReport(
     siteUrl: site.url,
     isInitial: false,
     meaningful,
-    reason: reasons.length > 0 ? reasons.join('; ') : 'No meaningful change detected',
+    reason: reasons.length > 0 ? reasons.join(' · ') : 'No user-facing feature or content update detected',
     changeHash,
     newPages,
     removedPages,
@@ -949,6 +1133,55 @@ export async function syncHubSitesOnly(): Promise<{ discovered: number; added: n
       addCandidate(sameAsUrl, '');
     }
 
+    // 4. Client-rendered SPA module bundle discovery (extracts JS-rendered project cards & links)
+    const moduleScriptSrcs: string[] = [];
+    $('script[type="module"][src]').each((_, el) => {
+      const src = $(el).attr('src');
+      if (!src) return;
+      try {
+        const absScript = normalizeUrl(new URL(src, resolvedHubUrl).toString());
+        if (new URL(absScript).hostname.toLowerCase() === hubHost && !moduleScriptSrcs.includes(absScript)) {
+          moduleScriptSrcs.push(absScript);
+        }
+      } catch {
+        // ignore invalid script src
+      }
+    });
+
+    for (const scriptUrl of moduleScriptSrcs.slice(0, 2)) {
+      try {
+        const jsRes = await safeFetchText(scriptUrl, {
+          timeoutMs: 16000,
+          retries: 1,
+          maxBytes: 2_000_000,
+          cacheBust: true,
+        });
+        const jsText = jsRes.text;
+
+        const titleFirstRe = /title\s*:\s*["']([^"']{2,70})["'][^}]{0,700}?link\s*:\s*["'](https?:\/\/[^"']+)["']/g;
+        let match: RegExpExecArray | null;
+        while ((match = titleFirstRe.exec(jsText)) !== null) {
+          addCandidate(match[2], match[1]);
+        }
+
+        const linkFirstRe = /link\s*:\s*["'](https?:\/\/[^"']+)["'][^}]{0,700}?title\s*:\s*["']([^"']{2,70})["']/g;
+        while ((match = linkFirstRe.exec(jsText)) !== null) {
+          addCandidate(match[1], match[2]);
+        }
+
+        const firstPartyUrlRe =
+          /https?:\/\/(?:[a-z0-9-]+\.)?(?:ai\.studio|github\.io|blogspot\.com|wordpress\.com|run\.app)(?:\/[a-zA-Z0-9._~:/?#[\]@!$&'()*+,;=%-]*)?/g;
+        const foundUrls = jsText.match(firstPartyUrlRe) || [];
+        for (const rawFound of foundUrls) {
+          const cleanFound = rawFound.replace(/[),.;'"`\\]+$/, '');
+          if (cleanFound.includes('/mshots/') || cleanFound.includes('/p/contact-us')) continue;
+          addCandidate(cleanFound, '');
+        }
+      } catch {
+        // ignore unreachable or oversized module bundle
+      }
+    }
+
     // Ensure hub itself is included if no external sites were found
     if (candidates.length === 0) {
       candidates.push({
@@ -993,9 +1226,10 @@ export async function checkSingleSite(
   }
 
   try {
-    const res = await safeFetchText(site.url, { timeoutMs: 14000, retries: 2 });
+    const res = await safeFetchText(site.url, { timeoutMs: 22000, retries: 2, cacheBust: true });
     const canonicalPageUrl = normalizeUrl(res.finalUrl || site.url);
     const signals = extractPageSignals(res.text, canonicalPageUrl);
+    await enrichSpaSignals(res.text, canonicalPageUrl, signals);
 
     const origin = new URL(canonicalPageUrl).origin;
     const hostLower = new URL(canonicalPageUrl).hostname.toLowerCase();
