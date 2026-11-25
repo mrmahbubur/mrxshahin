@@ -91,3 +91,18 @@ An automated full-stack editorial blog platform that continuously monitors linke
 4. **Verify Deployment**
    - Visit `/health` to confirm `{"status":"ok"}`.
    - New posts generated from monitored site updates are stored directly in PostgreSQL and pushed in real time to visitors via `/api/posts/stream` with no GitHub commits or Render redeploys needed.
+
+## Deploying on GitHub Pages
+
+Because raw repository root `index.html` points to `/src/main.tsx` and GitHub Pages does not run a Node/Express server, deploying directly from a raw branch shows a blank page unless built through the included GitHub Actions workflow (`.github/workflows/deploy.yml`).
+
+1. **Enable GitHub Actions Pages Deployment**
+   - In your GitHub repository, open **Settings → Pages**.
+   - Under **Build and deployment → Source**, select **GitHub Actions**.
+
+2. **Optional Repository Secrets**
+   - Under **Settings → Secrets and variables → Actions**, optionally add `GEMINI_API_KEY` (and `GITHUB_TOKEN` if needed). Even without secrets, the workflow collects live updates from monitored sites and generates grounded dispatches, 16:9 PNG thumbnails, affiliate ads, `rss.xml`, `sitemap.xml`, `404.html`, and `.nojekyll` into `dist/`.
+
+3. **Run Deployment**
+   - Push to `main` (or run **Actions → Deploy to GitHub Pages → Run workflow**). The workflow configures the exact repository base path (`VITE_BASE_PATH`) automatically so CSS, JS, images, and nested `/post/<slug>` routes load cleanly without a blank page.
+

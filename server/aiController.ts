@@ -7,6 +7,7 @@ import {
   getSetting,
   getSiteById,
   getThumbnailDataBySlug,
+  listAllAds,
   listAllPosts,
   listLogs,
   listPostsMissingThumbnails,
@@ -14,12 +15,13 @@ import {
   pruneOldLogs,
   setPostThumbnail,
   setSetting,
+  updateAdHealth,
   updatePost,
 } from './db.ts';
 import { getGeminiApiKey } from './env.ts';
 import { emitPublicPostPublished, emitPublicPostUpdated } from './events.ts';
 import { checkSingleSite, runMonitoringCycle, syncHubSitesOnly } from './monitor.ts';
-import { validateSlug } from './security.ts';
+import { validateExternalUrl, validateSlug } from './security.ts';
 import {
   buildFallbackThumbnailPng,
   getThumbnailCachePath,
@@ -33,6 +35,7 @@ const VALID_ACTIONS = new Set<AiDirectiveAction>([
   'heal_thumbnails',
   'promote_ready_drafts',
   'repair_post_metadata',
+  'verify_ads',
   'prune_logs',
 ]);
 
@@ -143,6 +146,7 @@ async function evaluateSystemWithAi(telemetry: {
   missingThumbnailCount: number;
   missingDiskCacheCount: number;
   postsNeedingMetaRepair: number;
+  adsNeedingVerification: number;
   recentErrors: string[];
 }): Promise<SupervisorEvaluation> {
   const deterministicActions = new Set<AiDirectiveAction>();
@@ -158,6 +162,9 @@ async function evaluateSystemWithAi(telemetry: {
   }
   if (!telemetry.draftMode && telemetry.draftPosts > 0) {
     deterministicActions.add('promote_ready_drafts');
+  }
+  if (telemetry.adsNeedingVerification > 0) {
+    deterministicActions.add('verify_ads');
   }
   deterministicActions.add('prune_logs');
 
@@ -211,6 +218,7 @@ RULES:
 - Choose "heal_thumbnails" if missingThumbnailCount > 0 or missingDiskCacheCount > 0.
 - Choose "repair_post_metadata" if postsNeedingMetaRepair > 0.
 - Choose "promote_ready_drafts" ONLY when draftMode is false and draftPosts > 0.
+- Choose "verify_ads" if adsNeedingVerification > 0.
 - Choose "prune_logs" to keep log storage healthy.
 - Keep recommendedIntervalMinutes at 1 when recovering, bootstrapping, or actively watching updates; 2-5 when stable.
 - Keep headlineDirective under 140 characters, factual and grounded strictly in the telemetry.`,
@@ -318,13 +326,14 @@ export async function runAiMaintenanceAndControl(
   const actionsExecuted: string[] = [];
 
   try {
-    const [stats, sites, posts, missingThumbs, recentLogs, autopilotEnabled] = await Promise.all([
+    const [stats, sites, posts, missingThumbs, recentLogs, autopilotEnabled, allAds] = await Promise.all([
       getAdminStats(),
       listSites(),
       listAllPosts(),
       listPostsMissingThumbnails(),
       listLogs(35),
       isAiAutopilotEnabled(),
+      listAllAds(),
     ]);
 
     const sitesWithPosts = new Set(posts.map((p) => p.siteId).filter((id): id is number => id !== null));
@@ -361,6 +370,15 @@ export async function runAiMaintenanceAndControl(
       .slice(0, 6)
       .map((l) => `${l.siteName || 'System'}: ${l.message}`);
 
+    const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
+    const adsToVerify = allAds.filter(
+      (ad) =>
+        ad.active &&
+        (ad.lastStatus !== 'ok' ||
+          !ad.lastCheckedAt ||
+          new Date(ad.lastCheckedAt).getTime() < sixHoursAgo)
+    );
+
     const evaluation = await evaluateSystemWithAi({
       totalSites: stats.totalSites,
       activeSites: stats.activeSites,
@@ -373,6 +391,7 @@ export async function runAiMaintenanceAndControl(
       missingThumbnailCount: missingThumbs.length,
       missingDiskCacheCount,
       postsNeedingMetaRepair: postsNeedingMetaRepair.length,
+      adsNeedingVerification: adsToVerify.length,
       recentErrors,
     });
 
@@ -504,6 +523,37 @@ export async function runAiMaintenanceAndControl(
         if (promotedCount > 0) {
           actionsExecuted.push(`promoted_drafts(${promotedCount})`);
         }
+      }
+
+      if (evaluation.actions.includes('verify_ads') && adsToVerify.length > 0) {
+        let verifiedOk = 0;
+        for (const ad of adsToVerify) {
+          try {
+            validateExternalUrl(ad.targetUrl);
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 5000);
+            try {
+              const res = await fetch(ad.targetUrl, {
+                method: 'GET',
+                redirect: 'follow',
+                signal: controller.signal,
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (compatible; MRSAutoBlogBot/1.0)',
+                },
+              });
+              if (res.url) {
+                validateExternalUrl(res.url);
+              }
+              await updateAdHealth(ad.id, res.status < 500 ? 'ok' : 'error');
+              if (res.status < 500) verifiedOk++;
+            } finally {
+              clearTimeout(timer);
+            }
+          } catch {
+            await updateAdHealth(ad.id, 'error');
+          }
+        }
+        actionsExecuted.push(`verified_ads(${verifiedOk}/${adsToVerify.length})`);
       }
 
       if (evaluation.actions.includes('prune_logs')) {

@@ -14,7 +14,9 @@ import {
   addLog,
   claimAdminPasswordHashAtomic,
   closeDb,
+  createAd,
   createManualSite,
+  deleteAd,
   deletePost,
   deleteSite,
   getAdminStats,
@@ -25,6 +27,8 @@ import {
   getSetting,
   getThumbnailDataBySlug,
   initDb,
+  listActiveAds,
+  listAllAds,
   listAllPosts,
   listAllPublishedPostsForFeed,
   listLogs,
@@ -33,8 +37,11 @@ import {
   listSites,
   getCategoriesWithCounts,
   getSiteById,
+  recordAdClick,
+  recordAdImpression,
   setPostThumbnail,
   setSetting,
+  updateAd,
   updatePost,
   updateSite,
 } from './server/db.ts';
@@ -481,6 +488,73 @@ ${urlsXml}
     }
   });
 
+  // ---------------- Public Affiliate Ads API ----------------
+
+  const adMetricsLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 180,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests' },
+  });
+
+  app.get('/api/ads', async (_req, res) => {
+    try {
+      const ads = await listActiveAds();
+      res.json({
+        ads: ads.map((ad) => ({
+          id: ad.id,
+          slot: ad.slot,
+          advertiserName: ad.advertiserName,
+          displayDomain: ad.displayDomain,
+          categoryLabel: ad.categoryLabel,
+          headline: ad.headline,
+          description: ad.description,
+          ctaLabel: ad.ctaLabel,
+          targetUrl: ad.targetUrl,
+        })),
+      });
+    } catch {
+      res.status(500).json({ error: 'Failed to load advertisements' });
+    }
+  });
+
+  app.post('/api/ads/:id/impression', adMetricsLimiter, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid ad ID' });
+      return;
+    }
+    try {
+      const updated = await recordAdImpression(id);
+      if (!updated) {
+        res.status(404).json({ error: 'Ad not found' });
+        return;
+      }
+      res.json({ recorded: true });
+    } catch {
+      res.status(500).json({ error: 'Failed to record impression' });
+    }
+  });
+
+  app.post('/api/ads/:id/click', adMetricsLimiter, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: 'Invalid ad ID' });
+      return;
+    }
+    try {
+      const updated = await recordAdClick(id);
+      if (!updated) {
+        res.status(404).json({ error: 'Ad not found' });
+        return;
+      }
+      res.json({ recorded: true });
+    } catch {
+      res.status(500).json({ error: 'Failed to record click' });
+    }
+  });
+
   // ---------------- Admin Auth & Rate-Limited API ----------------
 
   const adminApiLimiter = rateLimit({
@@ -603,18 +677,20 @@ ${urlsXml}
 
   app.get('/api/admin/dashboard', requireAdmin, async (_req, res) => {
     try {
-      const [stats, sites, posts, logs, aiControl] = await Promise.all([
+      const [stats, sites, posts, logs, aiControl, ads] = await Promise.all([
         getAdminStats(),
         listSites(),
         listAllPosts(),
         listLogs(150),
         getAiControlStatus(),
+        listAllAds(),
       ]);
       res.json({
         stats,
         sites,
         posts,
         logs,
+        ads,
         checkInProgress: isCheckRunning(),
         aiControl,
       });
@@ -844,6 +920,96 @@ ${urlsXml}
       res.json({ deleted: true });
     } catch {
       res.status(500).json({ error: 'Failed to delete post' });
+    }
+  });
+
+  app.post('/api/admin/ads', requireAdmin, async (req, res) => {
+    try {
+      const slot = req.body?.slot === 'sidebar' ? 'sidebar' : 'inline';
+      const advertiserName = typeof req.body?.advertiserName === 'string' ? req.body.advertiserName.trim() : '';
+      const displayDomain = typeof req.body?.displayDomain === 'string' ? req.body.displayDomain.trim() : '';
+      const categoryLabel = typeof req.body?.categoryLabel === 'string' ? req.body.categoryLabel.trim() : '';
+      const headline = typeof req.body?.headline === 'string' ? req.body.headline.trim() : '';
+      const description = typeof req.body?.description === 'string' ? req.body.description.trim() : '';
+      const ctaLabel = typeof req.body?.ctaLabel === 'string' ? req.body.ctaLabel.trim() : '';
+      const targetUrl = typeof req.body?.targetUrl === 'string' ? req.body.targetUrl.trim() : '';
+
+      if (!advertiserName || !headline || !targetUrl) {
+        res.status(400).json({ error: 'Advertiser name, headline, and affiliate URL are required.' });
+        return;
+      }
+
+      const parsedUrl = validateExternalUrl(targetUrl);
+      const ad = await createAd({
+        slot,
+        advertiserName,
+        displayDomain: displayDomain || parsedUrl.hostname.replace(/^www\./, ''),
+        categoryLabel: categoryLabel || 'Partner Offer',
+        headline,
+        description: description || `${advertiserName} affiliate partner spotlight.`,
+        ctaLabel: ctaLabel || 'Visit Offer',
+        targetUrl,
+        sortOrder: Number.isFinite(req.body?.sortOrder) ? Number(req.body.sortOrder) : 0,
+        active: req.body?.active !== false,
+      });
+
+      await addLog({
+        level: 'info',
+        action: 'ad_created',
+        message: `Added affiliate ad "${ad.advertiserName}" (${ad.slot})`,
+      });
+      res.status(201).json({ ad });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to create advertisement' });
+    }
+  });
+
+  app.patch('/api/admin/ads/:id', requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ error: 'Invalid ad ID' });
+        return;
+      }
+
+      const patch: Parameters<typeof updateAd>[1] = {};
+      if (req.body?.slot === 'inline' || req.body?.slot === 'sidebar') patch.slot = req.body.slot;
+      if (typeof req.body?.advertiserName === 'string') patch.advertiserName = req.body.advertiserName;
+      if (typeof req.body?.displayDomain === 'string') patch.displayDomain = req.body.displayDomain;
+      if (typeof req.body?.categoryLabel === 'string') patch.categoryLabel = req.body.categoryLabel;
+      if (typeof req.body?.headline === 'string') patch.headline = req.body.headline;
+      if (typeof req.body?.description === 'string') patch.description = req.body.description;
+      if (typeof req.body?.ctaLabel === 'string') patch.ctaLabel = req.body.ctaLabel;
+      if (typeof req.body?.targetUrl === 'string') patch.targetUrl = req.body.targetUrl;
+      if (typeof req.body?.active === 'boolean') patch.active = req.body.active;
+      if (Number.isFinite(req.body?.sortOrder)) patch.sortOrder = Number(req.body.sortOrder);
+
+      const ad = await updateAd(id, patch);
+      if (!ad) {
+        res.status(404).json({ error: 'Advertisement not found' });
+        return;
+      }
+      res.json({ ad });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to update advertisement' });
+    }
+  });
+
+  app.delete('/api/admin/ads/:id', requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id <= 0) {
+        res.status(400).json({ error: 'Invalid ad ID' });
+        return;
+      }
+      const ok = await deleteAd(id);
+      if (!ok) {
+        res.status(404).json({ error: 'Advertisement not found' });
+        return;
+      }
+      res.json({ deleted: true });
+    } catch {
+      res.status(500).json({ error: 'Failed to delete advertisement' });
     }
   });
 

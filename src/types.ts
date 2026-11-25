@@ -86,3 +86,28 @@ export interface AiControlStatus {
   fallbackReason?: string | null;
 }
 
+export type AdSlot = 'inline' | 'sidebar';
+
+export interface PublicAd {
+  id: number;
+  slot: AdSlot;
+  advertiserName: string;
+  displayDomain: string;
+  categoryLabel: string;
+  headline: string;
+  description: string;
+  ctaLabel: string;
+  targetUrl: string;
+}
+
+export interface AdminAd extends PublicAd {
+  active: boolean;
+  sortOrder: number;
+  impressions: number;
+  clicks: number;
+  lastCheckedAt: string | null;
+  lastStatus: 'ok' | 'error' | 'pending';
+  createdAt: string;
+  updatedAt: string;
+}
+

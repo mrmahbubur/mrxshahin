@@ -1,5 +1,6 @@
 import { Menu, Moon, Sun, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { withBase } from '../lib/paths';
 
 interface HeaderProps {
   currentPath: string;
@@ -40,7 +41,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-8 px-4 sm:px-6 h-16">
         {/* Zone 1: Editorial Masthead */}
         <a
-          href="/"
+          href={withBase('/')}
           onClick={(e) => handleLinkClick(e, '/')}
           className="flex items-baseline gap-3 whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
         >
@@ -58,7 +59,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
         {/* Zone 2: Editorial Navigation */}
         <nav aria-label="Main navigation" className="hidden md:flex items-center gap-7 text-sm font-medium text-zinc-600 dark:text-zinc-400">
           <a
-            href="/"
+            href={withBase('/')}
             aria-current={isHomeActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/')}
             className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 ${
@@ -70,7 +71,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             Dispatches
           </a>
           <a
-            href="/#labels"
+            href={withBase('/#labels')}
             aria-current={isLabelsActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/#labels')}
             className={`whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600 ${
@@ -82,14 +83,14 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             Labels
           </a>
           <a
-            href="/#archive"
+            href={withBase('/#archive')}
             onClick={(e) => handleLinkClick(e, '/#archive')}
             className="whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
           >
             Archive
           </a>
           <a
-            href="/rss.xml"
+            href={withBase('/rss.xml')}
             target="_blank"
             rel="noopener noreferrer"
             className="whitespace-nowrap shrink-0 transition-colors hover:text-zinc-900 dark:hover:text-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
@@ -130,7 +131,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
           className="md:hidden border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-4 py-3 flex flex-col gap-1"
         >
           <a
-            href="/"
+            href={withBase('/')}
             aria-current={isHomeActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
@@ -138,7 +139,7 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             Dispatches
           </a>
           <a
-            href="/#labels"
+            href={withBase('/#labels')}
             aria-current={isLabelsActive ? 'page' : undefined}
             onClick={(e) => handleLinkClick(e, '/#labels')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
@@ -146,14 +147,14 @@ export function Header({ currentPath, onNavigate, darkMode, onToggleDarkMode }: 
             Labels
           </a>
           <a
-            href="/#archive"
+            href={withBase('/#archive')}
             onClick={(e) => handleLinkClick(e, '/#archive')}
             className="px-3 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
           >
             Archive
           </a>
           <a
-            href="/rss.xml"
+            href={withBase('/rss.xml')}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => handleLinkClick(e, '/rss.xml')}

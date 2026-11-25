@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { withBase } from '../lib/paths';
 
 interface ThumbnailImageProps {
   src: string;
@@ -19,25 +20,26 @@ export function ThumbnailImage({
 }: ThumbnailImageProps) {
   const [failed, setFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const resolvedSrc = src ? withBase(src) : '';
 
   useEffect(() => {
     setFailed(false);
     setRetryCount(0);
-  }, [src]);
+  }, [resolvedSrc]);
 
   useEffect(() => {
-    if (!failed || retryCount >= 2 || !src) return;
+    if (!failed || retryCount >= 2 || !resolvedSrc) return;
     const timer = setTimeout(() => {
       setRetryCount((c) => c + 1);
       setFailed(false);
     }, retryCount === 0 ? 1000 : 2500);
     return () => clearTimeout(timer);
-  }, [failed, retryCount, src]);
+  }, [failed, retryCount, resolvedSrc]);
 
   const effectiveSrc =
-    retryCount > 0 && src
-      ? `${src}${src.includes('?') ? '&' : '?'}r=${retryCount}`
-      : src;
+    retryCount > 0 && resolvedSrc
+      ? `${resolvedSrc}${resolvedSrc.includes('?') ? '&' : '?'}r=${retryCount}`
+      : resolvedSrc;
 
   if ((failed && retryCount >= 2) || !src) {
     return (

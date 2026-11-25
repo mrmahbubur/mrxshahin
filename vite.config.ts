@@ -4,11 +4,30 @@ import fs from 'fs';
 import path from 'path';
 import {defineConfig} from 'vite';
 
+function resolveViteBasePath(): string {
+  const raw = (process.env.VITE_BASE_PATH || '/').trim();
+  if (!raw || raw === '/') return '/';
+  if (raw === './' || raw === '.') return './';
+  const withLeading = raw.startsWith('/') ? raw : `/${raw}`;
+  return withLeading.endsWith('/') ? withLeading : `${withLeading}/`;
+}
+
 export default defineConfig(() => {
+  const base = resolveViteBasePath();
+
   return {
+    base,
     plugins: [
       react(),
       tailwindcss(),
+      {
+        name: 'rewrite-html-base-links',
+        transformIndexHtml(html) {
+          if (base === '/') return html;
+          const cleanBase = base === './' ? './' : base;
+          return html.replace('href="/rss.xml"', `href="${cleanBase}rss.xml"`);
+        },
+      },
       // Copies src/assets into dist/ so root-relative URLs like
       // "/src/assets/images/..." (e.g. generate_image output) still resolve
       // in production builds. Do not remove.

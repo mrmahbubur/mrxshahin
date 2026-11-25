@@ -3,6 +3,7 @@ import { AdminPage } from './components/AdminPage';
 import { Header } from './components/Header';
 import { HomePage } from './components/HomePage';
 import { PostPage } from './components/PostPage';
+import { stripBase, withBase } from './lib/paths';
 
 interface AdminWindow extends Window {
   __MRS_ADMIN_PATH__?: string;
@@ -12,7 +13,7 @@ function getLocationPathWithQuery(): { pathname: string; searchQuery: string } {
   if (typeof window === 'undefined') return { pathname: '/', searchQuery: '' };
   const params = new URLSearchParams(window.location.search);
   return {
-    pathname: window.location.pathname || '/',
+    pathname: stripBase(window.location.pathname || '/'),
     searchQuery: params.get('q') || '',
   };
 }
@@ -151,7 +152,8 @@ export default function App() {
       const pathAndQuery = hashIndex >= 0 ? nextPath.slice(0, hashIndex) : nextPath;
       const rawHash = hashIndex >= 0 ? nextPath.slice(hashIndex + 1) : '';
       const targetFull = pathAndQuery || '/';
-      const nextUrlWithHash = rawHash ? `${targetFull}#${rawHash}` : targetFull;
+      const nextRelativeWithHash = rawHash ? `${targetFull}#${rawHash}` : targetFull;
+      const nextUrlWithHash = withBase(nextRelativeWithHash);
       const currentFull = window.location.pathname + window.location.search + window.location.hash;
 
       if (nextUrlWithHash !== currentFull) {
@@ -233,7 +235,7 @@ export default function App() {
             <ul className="space-y-2">
               <li>
                 <a
-                  href="/"
+                  href={withBase('/')}
                   onClick={(e) => {
                     e.preventDefault();
                     navigate('/');
@@ -245,7 +247,7 @@ export default function App() {
               </li>
               <li>
                 <a
-                  href="/#labels"
+                  href={withBase('/#labels')}
                   onClick={(e) => {
                     e.preventDefault();
                     navigate('/#labels');
@@ -257,7 +259,7 @@ export default function App() {
               </li>
               <li>
                 <a
-                  href="/#archive"
+                  href={withBase('/#archive')}
                   onClick={(e) => {
                     e.preventDefault();
                     navigate('/#archive');
@@ -275,7 +277,7 @@ export default function App() {
             <ul className="space-y-2">
               <li>
                 <a
-                  href="/rss.xml"
+                  href={withBase('/rss.xml')}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
@@ -285,7 +287,7 @@ export default function App() {
               </li>
               <li>
                 <a
-                  href="/sitemap.xml"
+                  href={withBase('/sitemap.xml')}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"

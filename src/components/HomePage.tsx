@@ -1,6 +1,8 @@
 import { ArrowRight, ChevronLeft, ChevronRight, RefreshCw, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import type { CategoryCount, PublicPostSummary } from '../types';
+import { fetchAdsWithFallback, fetchPostsWithFallback, isStaticMode, withBase } from '../lib/paths';
+import type { CategoryCount, PublicAd, PublicPostSummary } from '../types';
+import { SponsoredAdUnit } from './SponsoredAdUnit';
 import { ThumbnailImage } from './ThumbnailImage';
 
 interface HomePageProps {
@@ -35,6 +37,7 @@ export function HomePage({
   const [posts, setPosts] = useState<PublicPostSummary[]>([]);
   const [recentDispatches, setRecentDispatches] = useState<PublicPostSummary[]>([]);
   const [categories, setCategories] = useState<CategoryCount[]>([]);
+  const [ads, setAds] = useState<PublicAd[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory || 'all');
   const [searchInput, setSearchInput] = useState(initialSearch);
   const [activeSearch, setActiveSearch] = useState(initialSearch);
@@ -62,35 +65,18 @@ export function HomePage({
         setError(false);
       }
       try {
-        const params = new URLSearchParams({
-          page: String(page),
-          limit: '9',
-        });
-        if (selectedCategory !== 'all') params.set('category', selectedCategory);
-        if (activeSearch) params.set('search', activeSearch);
-
         const isUnfilteredFirstPage = page === 1 && selectedCategory === 'all' && !activeSearch;
-        const fetchOptions: RequestInit = {
-          cache: 'no-store',
-          headers: {
-            'Cache-Control': 'no-cache',
-            Pragma: 'no-cache',
-          },
-        };
-        const [postsRes, recentRes] = await Promise.all([
-          fetch(`/api/posts?${params.toString()}`, fetchOptions),
-          isUnfilteredFirstPage ? Promise.resolve(null) : fetch('/api/posts?page=1&limit=5', fetchOptions),
+        const [postsJson, recentJson] = await Promise.all([
+          fetchPostsWithFallback({
+            category: selectedCategory,
+            search: activeSearch,
+            page,
+            limit: 9,
+          }),
+          isUnfilteredFirstPage
+            ? Promise.resolve(null)
+            : fetchPostsWithFallback({ page: 1, limit: 5 }),
         ]);
-
-        if (!postsRes.ok) throw new Error('Failed to load');
-
-        const postsJson = (await postsRes.json()) as {
-          posts: PublicPostSummary[];
-          total: number;
-          page: number;
-          totalPages: number;
-          categories: CategoryCount[];
-        };
 
         setPosts(postsJson.posts);
         setTotalPosts(postsJson.total);
@@ -99,8 +85,7 @@ export function HomePage({
 
         if (isUnfilteredFirstPage) {
           setRecentDispatches(postsJson.posts.slice(0, 5));
-        } else if (recentRes && recentRes.ok) {
-          const recentJson = (await recentRes.json()) as { posts: PublicPostSummary[] };
+        } else if (recentJson) {
           setRecentDispatches((recentJson.posts || []).slice(0, 5));
         }
 
@@ -129,14 +114,30 @@ export function HomePage({
     loadData();
   }, [loadData, activeSearch, selectedCategory]);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchAdsWithFallback()
+      .then((loadedAds) => {
+        if (!cancelled) {
+          setAds(loadedAds);
+        }
+      })
+      .catch(() => {
+        // fail silent if ads endpoint is temporarily unavailable
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Real-time live inclusion of newly published, edited, or removed posts via SSE
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof EventSource === 'undefined') {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined' || isStaticMode()) {
       return;
     }
 
     let hasOpenedOnce = false;
-    const source = new EventSource('/api/posts/stream');
+    const source = new EventSource(withBase('/api/posts/stream'));
 
     source.onopen = () => {
       if (hasOpenedOnce) {
@@ -207,7 +208,7 @@ export function HomePage({
               ? `/category/${encodeURIComponent(selectedCategory)}`
               : '/';
           const nextUrl = trimmed ? `${base}?q=${encodeURIComponent(trimmed)}` : base;
-          window.history.replaceState({}, '', `${nextUrl}${window.location.hash}`);
+          window.history.replaceState({}, '', `${withBase(nextUrl)}${window.location.hash}`);
         }
       }
     }, 280);
@@ -238,6 +239,84 @@ export function HomePage({
   const featuredPost = showFeatured ? posts[0] : null;
   const streamPosts = showFeatured ? posts.slice(1) : posts;
   const totalArchiveCount = categories.reduce((acc, item) => acc + item.count, 0);
+  const inlineAds = ads.filter((ad) => ad.slot === 'inline');
+  const sidebarAds = ads.filter((ad) => ad.slot === 'sidebar');
+  const leadStreamPosts = streamPosts.length > 2 ? streamPosts.slice(0, 2) : streamPosts;
+  const remainingStreamPosts = streamPosts.length > 2 ? streamPosts.slice(2) : [];
+
+  const renderPostCard = (post: PublicPostSummary) => (
+    <article
+      key={post.id}
+      className="group flex flex-col rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822] overflow-hidden transition-colors hover:border-zinc-300 dark:hover:border-zinc-700"
+    >
+      <a
+        href={withBase(`/post/${post.slug}`)}
+        onClick={(e) => {
+          e.preventDefault();
+          onNavigate(`/post/${post.slug}`);
+        }}
+        className="block border-b border-zinc-100 dark:border-zinc-800/80"
+      >
+        <ThumbnailImage
+          src={getLiveThumbnailSrc(post)}
+          alt={post.title}
+          title={post.title}
+          siteName={post.category}
+        />
+      </a>
+
+      <div className="flex flex-1 flex-col justify-between p-5 space-y-4">
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+            <button
+              type="button"
+              onClick={() => handleSelectCategory(post.category)}
+              className="font-medium text-blue-700 dark:text-blue-400 hover:underline"
+            >
+              {post.category}
+            </button>
+            <span aria-hidden="true">·</span>
+            <time dateTime={post.publishedAt} className="tabular-nums">
+              {formatDate(post.publishedAt)}
+            </time>
+            <span aria-hidden="true">·</span>
+            <span className="tabular-nums">{post.readingTimeMinutes} min read</span>
+          </div>
+
+          <h2 className="font-display text-xl font-semibold leading-snug text-zinc-900 dark:text-zinc-50 [text-wrap:balance]">
+            <a
+              href={withBase(`/post/${post.slug}`)}
+              onClick={(e) => {
+                e.preventDefault();
+                onNavigate(`/post/${post.slug}`);
+              }}
+              className="hover:text-blue-700 dark:hover:text-blue-400 transition-colors"
+            >
+              {post.title}
+            </a>
+          </h2>
+
+          <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300 line-clamp-3">
+            {post.summary}
+          </p>
+        </div>
+
+        <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/80 text-xs">
+          <a
+            href={withBase(`/post/${post.slug}`)}
+            onClick={(e) => {
+              e.preventDefault();
+              onNavigate(`/post/${post.slug}`);
+            }}
+            className="font-medium text-zinc-800 dark:text-zinc-200 hover:text-blue-700 dark:hover:text-blue-400 inline-flex items-center gap-1"
+          >
+            <span>Continue reading</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </a>
+        </div>
+      </div>
+    </article>
+  );
 
   return (
     <main className="mx-auto max-w-6xl px-4 sm:px-6 py-8 sm:py-12 space-y-12">
@@ -270,7 +349,7 @@ export function HomePage({
         <section aria-label="Featured Dispatch" className="border-b border-zinc-200 dark:border-zinc-800 pb-12">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch">
             <a
-              href={`/post/${featuredPost.slug}`}
+              href={withBase(`/post/${featuredPost.slug}`)}
               onClick={(e) => {
                 e.preventDefault();
                 onNavigate(`/post/${featuredPost.slug}`);
@@ -307,7 +386,7 @@ export function HomePage({
 
                 <h1 className="font-display text-3xl sm:text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50 leading-[1.15] [text-wrap:balance]">
                   <a
-                    href={`/post/${featuredPost.slug}`}
+                    href={withBase(`/post/${featuredPost.slug}`)}
                     onClick={(e) => {
                       e.preventDefault();
                       onNavigate(`/post/${featuredPost.slug}`);
@@ -325,7 +404,7 @@ export function HomePage({
 
               <div className="pt-6">
                 <a
-                  href={`/post/${featuredPost.slug}`}
+                  href={withBase(`/post/${featuredPost.slug}`)}
                   onClick={(e) => {
                     e.preventDefault();
                     onNavigate(`/post/${featuredPost.slug}`);
@@ -344,7 +423,7 @@ export function HomePage({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch">
             <div className="lg:col-span-7 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-900">
               <img
-                src="/src/assets/images/editorial_hero_abstract_1795437088233.jpg"
+                src={withBase('/src/assets/images/editorial_hero_abstract_1795437088233.jpg')}
                 alt="M R S Auto Blog editorial publication"
                 referrerPolicy="no-referrer"
                 className="aspect-video w-full lg:h-full object-cover"
@@ -424,93 +503,52 @@ export function HomePage({
           </div>
 
           {streamPosts.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-7">
-              {streamPosts.map((post) => (
-                <article
-                  key={post.id}
-                  className="group flex flex-col rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822] overflow-hidden transition-colors hover:border-zinc-300 dark:hover:border-zinc-700"
-                >
-                  <a
-                    href={`/post/${post.slug}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      onNavigate(`/post/${post.slug}`);
-                    }}
-                    className="block border-b border-zinc-100 dark:border-zinc-800/80"
-                  >
-                    <ThumbnailImage
-                      src={getLiveThumbnailSrc(post)}
-                      alt={post.title}
-                      title={post.title}
-                      siteName={post.category}
-                    />
-                  </a>
+            <div className="space-y-8">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-7">
+                {leadStreamPosts.map(renderPostCard)}
+              </div>
 
-                  <div className="flex flex-1 flex-col justify-between p-5 space-y-4">
-                    <div className="space-y-2.5">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                        <button
-                          type="button"
-                          onClick={() => handleSelectCategory(post.category)}
-                          className="font-medium text-blue-700 dark:text-blue-400 hover:underline"
-                        >
-                          {post.category}
-                        </button>
-                        <span aria-hidden="true">·</span>
-                        <time dateTime={post.publishedAt} className="tabular-nums">
-                          {formatDate(post.publishedAt)}
-                        </time>
-                        <span aria-hidden="true">·</span>
-                        <span className="tabular-nums">{post.readingTimeMinutes} min read</span>
-                      </div>
+              {inlineAds.length > 0 && (
+                <div className="space-y-4">
+                  {inlineAds.map((ad) => (
+                    <SponsoredAdUnit key={ad.id} ad={ad} variant="inline" />
+                  ))}
+                </div>
+              )}
 
-                      <h2 className="font-display text-xl font-semibold leading-snug text-zinc-900 dark:text-zinc-50 [text-wrap:balance]">
-                        <a
-                          href={`/post/${post.slug}`}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            onNavigate(`/post/${post.slug}`);
-                          }}
-                          className="hover:text-blue-700 dark:hover:text-blue-400 transition-colors"
-                        >
-                          {post.title}
-                        </a>
-                      </h2>
-
-                      <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300 line-clamp-3">
-                        {post.summary}
-                      </p>
-                    </div>
-
-                    <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800/80 text-xs">
-                      <a
-                        href={`/post/${post.slug}`}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          onNavigate(`/post/${post.slug}`);
-                        }}
-                        className="font-medium text-zinc-800 dark:text-zinc-200 hover:text-blue-700 dark:hover:text-blue-400 inline-flex items-center gap-1"
-                      >
-                        <span>Continue reading</span>
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </a>
-                    </div>
-                  </div>
-                </article>
-              ))}
+              {remainingStreamPosts.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-7">
+                  {remainingStreamPosts.map(renderPostCard)}
+                </div>
+              )}
             </div>
           ) : (selectedCategory !== 'all' || activeSearch) && !loading ? (
-            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822] p-10 text-center space-y-3">
-              <p className="text-base font-medium text-zinc-800 dark:text-zinc-200">
-                No articles matched your current filter.
-              </p>
-              <button
-                type="button"
-                onClick={resetAllFilters}
-                className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 px-4 py-2 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-              >
-                Reset filters
-              </button>
+            <div className="space-y-8">
+              <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822] p-10 text-center space-y-3">
+                <p className="text-base font-medium text-zinc-800 dark:text-zinc-200">
+                  No articles matched your current filter.
+                </p>
+                <button
+                  type="button"
+                  onClick={resetAllFilters}
+                  className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 px-4 py-2 text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                >
+                  Reset filters
+                </button>
+              </div>
+              {inlineAds.length > 0 && (
+                <div className="space-y-4">
+                  {inlineAds.map((ad) => (
+                    <SponsoredAdUnit key={ad.id} ad={ad} variant="inline" />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : inlineAds.length > 0 && !loading ? (
+            <div className="space-y-4">
+              {inlineAds.map((ad) => (
+                <SponsoredAdUnit key={ad.id} ad={ad} variant="inline" />
+              ))}
             </div>
           ) : null}
 
@@ -593,7 +631,7 @@ export function HomePage({
                 {recentDispatches.map((item) => (
                   <article key={item.id} className="py-3.5 first:pt-0 last:pb-0 flex items-start gap-3.5 group">
                     <a
-                      href={`/post/${item.slug}`}
+                      href={withBase(`/post/${item.slug}`)}
                       onClick={(e) => {
                         e.preventDefault();
                         onNavigate(`/post/${item.slug}`);
@@ -610,7 +648,7 @@ export function HomePage({
                     <div className="min-w-0 space-y-1">
                       <h3 className="text-sm font-semibold leading-snug text-zinc-900 dark:text-zinc-100 line-clamp-2">
                         <a
-                          href={`/post/${item.slug}`}
+                          href={withBase(`/post/${item.slug}`)}
                           onClick={(e) => {
                             e.preventDefault();
                             onNavigate(`/post/${item.slug}`);
@@ -675,6 +713,15 @@ export function HomePage({
             </section>
           )}
 
+          {/* Widget 3.5: Partner Recommendations */}
+          {sidebarAds.length > 0 && (
+            <section aria-label="Partner Recommendations" className="border-t border-zinc-200 dark:border-zinc-800 pt-7 space-y-4">
+              {sidebarAds.map((ad) => (
+                <SponsoredAdUnit key={ad.id} ad={ad} variant="sidebar" />
+              ))}
+            </section>
+          )}
+
           {/* Widget 4: About & Feeds */}
           <section className="border-t border-zinc-200 dark:border-zinc-800 pt-7 space-y-3">
             <h2 className="font-display text-lg font-semibold text-zinc-900 dark:text-zinc-50">
@@ -685,7 +732,7 @@ export function HomePage({
             </p>
             <div className="flex items-center gap-5 pt-1 text-xs font-medium">
               <a
-                href="/rss.xml"
+                href={withBase('/rss.xml')}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-700 dark:text-blue-400 hover:underline"
@@ -693,7 +740,7 @@ export function HomePage({
                 Subscribe via RSS
               </a>
               <a
-                href="/sitemap.xml"
+                href={withBase('/sitemap.xml')}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:underline"

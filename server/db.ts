@@ -3,8 +3,11 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { getDatabaseUrl } from './env.ts';
-import { normalizeExternalUrl } from './security.ts';
+import { normalizeExternalUrl, validateExternalUrl } from './security.ts';
 import type {
+  AdHealthStatus,
+  AdRecord,
+  AdSlot,
   ChangeReport,
   DbEngine,
   GithubActivity,
@@ -82,6 +85,7 @@ export async function initDb(): Promise<DbEngine> {
       await createPostgresSchema(pgPool);
       activeEngine = 'postgres';
       await seedDefaultSettings();
+      await seedDefaultAds();
       return activeEngine;
     } catch (err) {
       console.error('Postgres connection failed, falling back to SQLite:', err);
@@ -98,6 +102,7 @@ export async function initDb(): Promise<DbEngine> {
   createSqliteSchema(sqliteDb);
   activeEngine = 'sqlite';
   await seedDefaultSettings();
+  await seedDefaultAds();
   return activeEngine;
 }
 
@@ -182,6 +187,28 @@ async function createPostgresSchema(pool: pg.Pool): Promise<void> {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS ads (
+      id SERIAL PRIMARY KEY,
+      slot TEXT NOT NULL DEFAULT 'inline',
+      advertiser_name TEXT NOT NULL,
+      display_domain TEXT NOT NULL,
+      category_label TEXT NOT NULL,
+      headline TEXT NOT NULL,
+      description TEXT NOT NULL,
+      cta_label TEXT NOT NULL,
+      target_url TEXT NOT NULL UNIQUE,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      impressions INTEGER NOT NULL DEFAULT 0,
+      clicks INTEGER NOT NULL DEFAULT 0,
+      last_checked_at TEXT,
+      last_status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ads_active_slot ON ads(active, slot, sort_order ASC, id ASC);
   `);
 }
 
@@ -266,6 +293,28 @@ function createSqliteSchema(db: Database.Database): void {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS ads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slot TEXT NOT NULL DEFAULT 'inline',
+      advertiser_name TEXT NOT NULL,
+      display_domain TEXT NOT NULL,
+      category_label TEXT NOT NULL,
+      headline TEXT NOT NULL,
+      description TEXT NOT NULL,
+      cta_label TEXT NOT NULL,
+      target_url TEXT NOT NULL UNIQUE,
+      active INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      impressions INTEGER NOT NULL DEFAULT 0,
+      clicks INTEGER NOT NULL DEFAULT 0,
+      last_checked_at TEXT,
+      last_status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ads_active_slot ON ads(active, slot, sort_order ASC, id ASC);
   `);
 }
 
@@ -1405,4 +1454,363 @@ export async function getAdminStats(): Promise<{
     draftMode,
     dbEngine: activeEngine,
   };
+}
+
+// ---------------- Affiliate Advertisements ----------------
+
+function mapAdRow(row: Record<string, unknown>): AdRecord {
+  return {
+    id: Number(row.id),
+    slot: (row.slot === 'sidebar' ? 'sidebar' : 'inline') as AdSlot,
+    advertiserName: String(row.advertiser_name),
+    displayDomain: String(row.display_domain),
+    categoryLabel: String(row.category_label),
+    headline: String(row.headline),
+    description: String(row.description),
+    ctaLabel: String(row.cta_label),
+    targetUrl: String(row.target_url),
+    active: Boolean(row.active),
+    sortOrder: Number(row.sort_order ?? 0),
+    impressions: Number(row.impressions ?? 0),
+    clicks: Number(row.clicks ?? 0),
+    lastCheckedAt: row.last_checked_at ? String(row.last_checked_at) : null,
+    lastStatus: (row.last_status as AdHealthStatus) || 'pending',
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function validateAffiliateTargetUrl(rawUrl: string): string {
+  const parsed = validateExternalUrl(rawUrl);
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('Affiliate link must use http:// or https://');
+  }
+  return rawUrl.trim();
+}
+
+async function seedDefaultAds(): Promise<void> {
+  const defaults: Array<{
+    slot: AdSlot;
+    advertiserName: string;
+    displayDomain: string;
+    categoryLabel: string;
+    headline: string;
+    description: string;
+    ctaLabel: string;
+    targetUrl: string;
+    sortOrder: number;
+  }> = [
+    {
+      slot: 'inline',
+      advertiserName: 'Alibaba.com',
+      displayDomain: 'alibaba.com',
+      categoryLabel: 'Global B2B Sourcing',
+      headline: 'Source Direct From Verified Global Manufacturers',
+      description:
+        'Connect with OEM suppliers, wholesalers, and trade-assured bulk procurement partners across global manufacturing hubs.',
+      ctaLabel: 'Browse Suppliers',
+      targetUrl: 'https://rzekl.com/g/pm1aev55clcb5002cfdd219aa26f6f/',
+      sortOrder: 1,
+    },
+    {
+      slot: 'sidebar',
+      advertiserName: 'AliExpress',
+      displayDomain: 'aliexpress.com',
+      categoryLabel: 'Tech, Tools & Gear',
+      headline: 'Direct Deals on Electronics, Tools & Everyday Tech',
+      description:
+        'Shop consumer electronics, maker hardware, phone accessories, tools, and automotive gear shipped worldwide.',
+      ctaLabel: 'Explore Deals',
+      targetUrl: 'https://rzekl.com/g/1e8d114494cb5002cfdd16525dc3e8/',
+      sortOrder: 2,
+    },
+  ];
+
+  const ts = nowIso();
+  for (const ad of defaults) {
+    if (pgPool) {
+      await pgPool.query(
+        `INSERT INTO ads (
+          slot, advertiser_name, display_domain, category_label, headline, description,
+          cta_label, target_url, active, sort_order, impressions, clicks, last_status, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE,$9,0,0,'pending',$10,$11)
+        ON CONFLICT (target_url) DO NOTHING`,
+        [
+          ad.slot,
+          ad.advertiserName,
+          ad.displayDomain,
+          ad.categoryLabel,
+          ad.headline,
+          ad.description,
+          ad.ctaLabel,
+          ad.targetUrl,
+          ad.sortOrder,
+          ts,
+          ts,
+        ]
+      );
+    } else {
+      sqliteDb!
+        .prepare(
+          `INSERT OR IGNORE INTO ads (
+            slot, advertiser_name, display_domain, category_label, headline, description,
+            cta_label, target_url, active, sort_order, impressions, clicks, last_status, created_at, updated_at
+          ) VALUES (?,?,?,?,?,?,?,?,1,?,0,0,'pending',?,?)`
+        )
+        .run(
+          ad.slot,
+          ad.advertiserName,
+          ad.displayDomain,
+          ad.categoryLabel,
+          ad.headline,
+          ad.description,
+          ad.ctaLabel,
+          ad.targetUrl,
+          ad.sortOrder,
+          ts,
+          ts
+        );
+    }
+  }
+}
+
+export async function listActiveAds(): Promise<AdRecord[]> {
+  if (pgPool) {
+    const res = await pgPool.query(
+      'SELECT * FROM ads WHERE active = TRUE ORDER BY sort_order ASC, id ASC'
+    );
+    return res.rows.map(mapAdRow);
+  }
+  const rows = sqliteDb!
+    .prepare('SELECT * FROM ads WHERE active = 1 ORDER BY sort_order ASC, id ASC')
+    .all() as Record<string, unknown>[];
+  return rows.map(mapAdRow);
+}
+
+export async function listAllAds(): Promise<AdRecord[]> {
+  if (pgPool) {
+    const res = await pgPool.query('SELECT * FROM ads ORDER BY sort_order ASC, id ASC');
+    return res.rows.map(mapAdRow);
+  }
+  const rows = sqliteDb!
+    .prepare('SELECT * FROM ads ORDER BY sort_order ASC, id ASC')
+    .all() as Record<string, unknown>[];
+  return rows.map(mapAdRow);
+}
+
+export async function getAdById(id: number): Promise<AdRecord | null> {
+  if (pgPool) {
+    const res = await pgPool.query('SELECT * FROM ads WHERE id = $1', [id]);
+    return res.rows[0] ? mapAdRow(res.rows[0]) : null;
+  }
+  const row = sqliteDb!.prepare('SELECT * FROM ads WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? mapAdRow(row) : null;
+}
+
+export async function createAd(input: {
+  slot: AdSlot;
+  advertiserName: string;
+  displayDomain: string;
+  categoryLabel: string;
+  headline: string;
+  description: string;
+  ctaLabel: string;
+  targetUrl: string;
+  sortOrder?: number;
+  active?: boolean;
+}): Promise<AdRecord> {
+  const safeUrl = validateAffiliateTargetUrl(input.targetUrl);
+  const ts = nowIso();
+  const slot: AdSlot = input.slot === 'sidebar' ? 'sidebar' : 'inline';
+  const active = input.active !== false;
+  const sortOrder = Number.isFinite(input.sortOrder) ? Number(input.sortOrder) : 0;
+
+  if (pgPool) {
+    const res = await pgPool.query(
+      `INSERT INTO ads (
+        slot, advertiser_name, display_domain, category_label, headline, description,
+        cta_label, target_url, active, sort_order, impressions, clicks, last_status, created_at, updated_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,0,'pending',$11,$12)
+      RETURNING *`,
+      [
+        slot,
+        input.advertiserName.trim(),
+        input.displayDomain.trim(),
+        input.categoryLabel.trim(),
+        input.headline.trim(),
+        input.description.trim(),
+        input.ctaLabel.trim(),
+        safeUrl,
+        active,
+        sortOrder,
+        ts,
+        ts,
+      ]
+    );
+    return mapAdRow(res.rows[0]);
+  }
+
+  const info = sqliteDb!
+    .prepare(
+      `INSERT INTO ads (
+        slot, advertiser_name, display_domain, category_label, headline, description,
+        cta_label, target_url, active, sort_order, impressions, clicks, last_status, created_at, updated_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,0,0,'pending',?,?)`
+    )
+    .run(
+      slot,
+      input.advertiserName.trim(),
+      input.displayDomain.trim(),
+      input.categoryLabel.trim(),
+      input.headline.trim(),
+      input.description.trim(),
+      input.ctaLabel.trim(),
+      safeUrl,
+      active ? 1 : 0,
+      sortOrder,
+      ts,
+      ts
+    );
+
+  const created = sqliteDb!.prepare('SELECT * FROM ads WHERE id = ?').get(info.lastInsertRowid) as Record<
+    string,
+    unknown
+  >;
+  return mapAdRow(created);
+}
+
+export async function updateAd(
+  id: number,
+  patch: Partial<{
+    slot: AdSlot;
+    advertiserName: string;
+    displayDomain: string;
+    categoryLabel: string;
+    headline: string;
+    description: string;
+    ctaLabel: string;
+    targetUrl: string;
+    active: boolean;
+    sortOrder: number;
+  }>
+): Promise<AdRecord | null> {
+  const existing = await getAdById(id);
+  if (!existing) return null;
+
+  const next = {
+    slot: patch.slot ? (patch.slot === 'sidebar' ? 'sidebar' : 'inline') : existing.slot,
+    advertiserName: patch.advertiserName?.trim() || existing.advertiserName,
+    displayDomain: patch.displayDomain?.trim() || existing.displayDomain,
+    categoryLabel: patch.categoryLabel?.trim() || existing.categoryLabel,
+    headline: patch.headline?.trim() || existing.headline,
+    description: patch.description?.trim() || existing.description,
+    ctaLabel: patch.ctaLabel?.trim() || existing.ctaLabel,
+    targetUrl: patch.targetUrl ? validateAffiliateTargetUrl(patch.targetUrl) : existing.targetUrl,
+    active: patch.active !== undefined ? patch.active : existing.active,
+    sortOrder: patch.sortOrder !== undefined ? patch.sortOrder : existing.sortOrder,
+    updatedAt: nowIso(),
+  };
+
+  if (pgPool) {
+    const res = await pgPool.query(
+      `UPDATE ads SET
+        slot = $1, advertiser_name = $2, display_domain = $3, category_label = $4,
+        headline = $5, description = $6, cta_label = $7, target_url = $8,
+        active = $9, sort_order = $10, updated_at = $11
+       WHERE id = $12 RETURNING *`,
+      [
+        next.slot,
+        next.advertiserName,
+        next.displayDomain,
+        next.categoryLabel,
+        next.headline,
+        next.description,
+        next.ctaLabel,
+        next.targetUrl,
+        next.active,
+        next.sortOrder,
+        next.updatedAt,
+        id,
+      ]
+    );
+    return res.rows[0] ? mapAdRow(res.rows[0]) : null;
+  }
+
+  sqliteDb!
+    .prepare(
+      `UPDATE ads SET
+        slot = ?, advertiser_name = ?, display_domain = ?, category_label = ?,
+        headline = ?, description = ?, cta_label = ?, target_url = ?,
+        active = ?, sort_order = ?, updated_at = ?
+       WHERE id = ?`
+    )
+    .run(
+      next.slot,
+      next.advertiserName,
+      next.displayDomain,
+      next.categoryLabel,
+      next.headline,
+      next.description,
+      next.ctaLabel,
+      next.targetUrl,
+      next.active ? 1 : 0,
+      next.sortOrder,
+      next.updatedAt,
+      id
+    );
+  return getAdById(id);
+}
+
+export async function deleteAd(id: number): Promise<boolean> {
+  if (pgPool) {
+    const res = await pgPool.query('DELETE FROM ads WHERE id = $1', [id]);
+    return (res.rowCount ?? 0) > 0;
+  }
+  const res = sqliteDb!.prepare('DELETE FROM ads WHERE id = ?').run(id);
+  return res.changes > 0;
+}
+
+export async function recordAdImpression(id: number): Promise<boolean> {
+  if (pgPool) {
+    const res = await pgPool.query(
+      'UPDATE ads SET impressions = impressions + 1 WHERE id = $1 AND active = TRUE',
+      [id]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+  const res = sqliteDb!
+    .prepare('UPDATE ads SET impressions = impressions + 1 WHERE id = ? AND active = 1')
+    .run(id);
+  return res.changes > 0;
+}
+
+export async function recordAdClick(id: number): Promise<boolean> {
+  if (pgPool) {
+    const res = await pgPool.query(
+      'UPDATE ads SET clicks = clicks + 1 WHERE id = $1 AND active = TRUE',
+      [id]
+    );
+    return (res.rowCount ?? 0) > 0;
+  }
+  const res = sqliteDb!
+    .prepare('UPDATE ads SET clicks = clicks + 1 WHERE id = ? AND active = 1')
+    .run(id);
+  return res.changes > 0;
+}
+
+export async function updateAdHealth(id: number, status: AdHealthStatus): Promise<void> {
+  const ts = nowIso();
+  if (pgPool) {
+    await pgPool.query('UPDATE ads SET last_checked_at = $1, last_status = $2 WHERE id = $3', [
+      ts,
+      status,
+      id,
+    ]);
+    return;
+  }
+  sqliteDb!
+    .prepare('UPDATE ads SET last_checked_at = ?, last_status = ? WHERE id = ?')
+    .run(ts, status, id);
 }

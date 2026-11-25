@@ -1,6 +1,8 @@
 import { ArrowLeft, ArrowUpRight, Check, Copy, Share2 } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
-import type { FullPost, PublicPostSummary } from '../types';
+import { fetchAdsWithFallback, fetchPostBySlugWithFallback, isStaticMode, withBase } from '../lib/paths';
+import type { FullPost, PublicAd, PublicPostSummary } from '../types';
+import { SponsoredAdUnit } from './SponsoredAdUnit';
 import { ThumbnailImage } from './ThumbnailImage';
 
 interface PostPageProps {
@@ -139,6 +141,7 @@ function formatDate(iso: string): string {
 export function PostPage({ slug, onNavigate }: PostPageProps) {
   const [post, setPost] = useState<FullPost | null>(null);
   const [related, setRelated] = useState<PublicPostSummary[]>([]);
+  const [ads, setAds] = useState<PublicAd[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -152,17 +155,7 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
     }
 
     const fetchPost = (silent = false) => {
-      fetch(`/api/posts/${encodeURIComponent(slug)}`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache',
-          Pragma: 'no-cache',
-        },
-      })
-        .then(async (res) => {
-          if (!res.ok) throw new Error('Dispatch not found');
-          return res.json() as Promise<{ post: FullPost; related: PublicPostSummary[] }>;
-        })
+      fetchPostBySlugWithFallback(slug)
         .then((data) => {
           if (cancelled) return;
           setPost(data.post);
@@ -183,8 +176,8 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
     fetchPost(false);
 
     let source: EventSource | null = null;
-    if (typeof window !== 'undefined' && typeof EventSource !== 'undefined') {
-      source = new EventSource('/api/posts/stream');
+    if (typeof window !== 'undefined' && typeof EventSource !== 'undefined' && !isStaticMode()) {
+      source = new EventSource(withBase('/api/posts/stream'));
       const handleEvent = (ev: MessageEvent) => {
         try {
           const payload = JSON.parse(ev.data) as { slug?: string; post?: { slug?: string } };
@@ -206,6 +199,22 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
       source?.close();
     };
   }, [slug]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAdsWithFallback()
+      .then((loadedAds) => {
+        if (!cancelled) {
+          setAds(loadedAds);
+        }
+      })
+      .catch(() => {
+        // ignore passive ad fetch errors
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const parsedContent = useMemo(
     () => (post ? parseSafeArticleContent(post.contentHtml) : { nodes: [], toc: [] }),
@@ -275,13 +284,15 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
 
   const shareUrl = typeof window !== 'undefined' ? encodeURIComponent(window.location.href) : '';
   const shareTitle = encodeURIComponent(post.title);
+  const inlineAds = ads.filter((ad) => ad.slot === 'inline');
+  const sidebarAds = ads.filter((ad) => ad.slot === 'sidebar');
 
   return (
     <main className="mx-auto max-w-5xl px-4 sm:px-6 py-10 sm:py-14 space-y-12">
       {/* Blogger Breadcrumb Navigation */}
       <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
         <a
-          href="/"
+          href={withBase('/')}
           onClick={(e) => {
             e.preventDefault();
             onNavigate('/');
@@ -293,7 +304,7 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
         </a>
         <span aria-hidden="true">/</span>
         <a
-          href={`/category/${encodeURIComponent(post.category)}`}
+          href={withBase(`/category/${encodeURIComponent(post.category)}`)}
           onClick={(e) => {
             e.preventDefault();
             onNavigate(`/category/${encodeURIComponent(post.category)}`);
@@ -447,8 +458,24 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
               </p>
             </div>
           )}
+
+          {sidebarAds.length > 0 && (
+            <div className="space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-6">
+              {sidebarAds.map((ad) => (
+                <SponsoredAdUnit key={ad.id} ad={ad} variant="sidebar" />
+              ))}
+            </div>
+          )}
         </aside>
       </div>
+
+      {inlineAds.length > 0 && (
+        <section aria-label="Partner Spotlight" className="space-y-4">
+          {inlineAds.map((ad) => (
+            <SponsoredAdUnit key={ad.id} ad={ad} variant="inline" />
+          ))}
+        </section>
+      )}
 
       {/* Related Posts */}
       {related.length > 0 && (
@@ -463,7 +490,7 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
                 className="group rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822] overflow-hidden flex flex-col"
               >
                 <a
-                  href={`/post/${item.slug}`}
+                  href={withBase(`/post/${item.slug}`)}
                   onClick={(e) => {
                     e.preventDefault();
                     onNavigate(`/post/${item.slug}`);
@@ -488,7 +515,7 @@ export function PostPage({ slug, onNavigate }: PostPageProps) {
                   </div>
                   <h3 className="font-display text-base font-semibold leading-snug text-zinc-900 dark:text-zinc-100">
                     <a
-                      href={`/post/${item.slug}`}
+                      href={withBase(`/post/${item.slug}`)}
                       onClick={(e) => {
                         e.preventDefault();
                         onNavigate(`/post/${item.slug}`);

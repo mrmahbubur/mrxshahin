@@ -167,6 +167,7 @@ export type AiDirectiveAction =
   | 'heal_thumbnails'
   | 'promote_ready_drafts'
   | 'repair_post_metadata'
+  | 'verify_ads'
   | 'prune_logs';
 
 export type AiSystemHealth = 'healthy' | 'degraded' | 'recovering';
@@ -182,5 +183,28 @@ export interface AiControlStatus {
   usedAiReasoning: boolean;
   reasoningModel: string;
   fallbackReason?: string | null;
+}
+
+export type AdSlot = 'inline' | 'sidebar';
+export type AdHealthStatus = 'ok' | 'error' | 'pending';
+
+export interface AdRecord {
+  id: number;
+  slot: AdSlot;
+  advertiserName: string;
+  displayDomain: string;
+  categoryLabel: string;
+  headline: string;
+  description: string;
+  ctaLabel: string;
+  targetUrl: string;
+  active: boolean;
+  sortOrder: number;
+  impressions: number;
+  clicks: number;
+  lastCheckedAt: string | null;
+  lastStatus: AdHealthStatus;
+  createdAt: string;
+  updatedAt: string;
 }
 

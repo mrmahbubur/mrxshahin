@@ -14,7 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import type { ActivityLog, AdminSite, AdminStats, AiControlStatus, FullPost, LogLevel } from '../types';
+import type { ActivityLog, AdminAd, AdminSite, AdminStats, AdSlot, AiControlStatus, FullPost, LogLevel } from '../types';
 import { ThumbnailImage } from './ThumbnailImage';
 
 interface AdminPageProps {
@@ -23,7 +23,7 @@ interface AdminPageProps {
   onNavigate: (path: string) => void;
 }
 
-type AdminTab = 'posts' | 'sites' | 'logs';
+type AdminTab = 'posts' | 'sites' | 'ads' | 'logs';
 
 function formatTimestamp(iso: string | null): string {
   if (!iso) return 'Never';
@@ -51,6 +51,7 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
   const [aiControl, setAiControl] = useState<AiControlStatus | null>(null);
   const [sites, setSites] = useState<AdminSite[]>([]);
   const [posts, setPosts] = useState<FullPost[]>([]);
+  const [ads, setAds] = useState<AdminAd[]>([]);
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [loadingDash, setLoadingDash] = useState(false);
   const [actionMsg, setActionMsg] = useState<string | null>(null);
@@ -67,6 +68,16 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
   const [newSiteRss, setNewSiteRss] = useState('');
   const [newSiteSitemap, setNewSiteSitemap] = useState('');
   const [newSiteGithub, setNewSiteGithub] = useState('');
+
+  // Add ad form
+  const [newAdSlot, setNewAdSlot] = useState<AdSlot>('inline');
+  const [newAdAdvertiser, setNewAdAdvertiser] = useState('');
+  const [newAdDomain, setNewAdDomain] = useState('');
+  const [newAdCategory, setNewAdCategory] = useState('');
+  const [newAdHeadline, setNewAdHeadline] = useState('');
+  const [newAdDescription, setNewAdDescription] = useState('');
+  const [newAdCta, setNewAdCta] = useState('Visit Offer');
+  const [newAdUrl, setNewAdUrl] = useState('');
 
   // Post Editor Modal State
   const [editingPost, setEditingPost] = useState<FullPost | null>(null);
@@ -145,12 +156,14 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
           stats: AdminStats;
           sites: AdminSite[];
           posts: FullPost[];
+          ads?: AdminAd[];
           logs: ActivityLog[];
           aiControl?: AiControlStatus;
         };
         setStats(data.stats);
         setSites(data.sites);
         setPosts(data.posts);
+        setAds(data.ads || []);
         setLogs(data.logs);
         if (data.aiControl) {
           setAiControl(data.aiControl);
@@ -351,6 +364,39 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
       setNewSiteSitemap('');
       setNewSiteGithub('');
       setActionMsg('Monitored site added.');
+    });
+  };
+
+  const handleAddAd = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await runAdminAction('add-ad', async () => {
+      const res = await fetch('/api/admin/ads', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          slot: newAdSlot,
+          advertiserName: newAdAdvertiser,
+          displayDomain: newAdDomain || undefined,
+          categoryLabel: newAdCategory || undefined,
+          headline: newAdHeadline,
+          description: newAdDescription || undefined,
+          ctaLabel: newAdCta || 'Visit Offer',
+          targetUrl: newAdUrl,
+        }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error || 'Failed to add advertisement');
+      setNewAdAdvertiser('');
+      setNewAdDomain('');
+      setNewAdCategory('');
+      setNewAdHeadline('');
+      setNewAdDescription('');
+      setNewAdCta('Visit Offer');
+      setNewAdUrl('');
+      setActionMsg('Affiliate advertisement added.');
     });
   };
 
@@ -666,10 +712,11 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
       )}
 
       {/* Navigation Tabs */}
-      <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex items-center gap-2 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800">
         {([
           { id: 'posts', label: `Posts (${posts.length})` },
           { id: 'sites', label: `Monitored Sites (${sites.length})` },
+          { id: 'ads', label: `Advertisements (${ads.length})` },
           { id: 'logs', label: `Activity Log (${logs.length})` },
         ] as Array<{ id: AdminTab; label: string }>).map((item) => (
           <button
@@ -1090,7 +1137,231 @@ export function AdminPage({ token, onSetToken, onNavigate }: AdminPageProps) {
         </section>
       )}
 
-      {/* Tab 3: Activity Log */}
+      {/* Tab 3: Affiliate Advertisements */}
+      {tab === 'ads' && (
+        <section className="space-y-6">
+          <form
+            onSubmit={handleAddAd}
+            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822] p-5 space-y-4"
+          >
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Add Affiliate Advertisement
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <select
+                value={newAdSlot}
+                onChange={(e) => setNewAdSlot(e.target.value === 'sidebar' ? 'sidebar' : 'inline')}
+                aria-label="Placement Slot"
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100"
+              >
+                <option value="inline">Inline Stream Slot</option>
+                <option value="sidebar">Sidebar Slot</option>
+              </select>
+              <input
+                type="text"
+                required
+                placeholder="Advertiser Name (e.g. Alibaba.com)"
+                value={newAdAdvertiser}
+                onChange={(e) => setNewAdAdvertiser(e.target.value)}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100"
+              />
+              <input
+                type="text"
+                placeholder="Display Domain (e.g. alibaba.com)"
+                value={newAdDomain}
+                onChange={(e) => setNewAdDomain(e.target.value)}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100"
+              />
+              <input
+                type="text"
+                placeholder="Category Label"
+                value={newAdCategory}
+                onChange={(e) => setNewAdCategory(e.target.value)}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100"
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <input
+                type="text"
+                required
+                placeholder="Editorial Headline"
+                value={newAdHeadline}
+                onChange={(e) => setNewAdHeadline(e.target.value)}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100"
+              />
+              <input
+                type="url"
+                required
+                placeholder="https://rzekl.com/..."
+                value={newAdUrl}
+                onChange={(e) => setNewAdUrl(e.target.value)}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-3 py-2 text-xs font-mono text-zinc-900 dark:text-zinc-100"
+              />
+              <input
+                type="text"
+                placeholder="CTA Label (e.g. Explore Deals)"
+                value={newAdCta}
+                onChange={(e) => setNewAdCta(e.target.value)}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100"
+              />
+            </div>
+            <input
+              type="text"
+              placeholder="Concise description"
+              value={newAdDescription}
+              onChange={(e) => setNewAdDescription(e.target.value)}
+              className="w-full rounded-lg border border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14] px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100"
+            />
+            <div>
+              <button
+                type="submit"
+                disabled={busyAction !== null}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-900 dark:bg-zinc-100 px-4 py-2 text-xs font-medium text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 whitespace-nowrap shrink-0"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>Add Advertisement</span>
+              </button>
+            </div>
+          </form>
+
+          <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-[#131822]">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Advertiser &amp; Headline</th>
+                  <th className="px-4 py-3 font-medium">Slot</th>
+                  <th className="px-4 py-3 font-medium">Link Health</th>
+                  <th className="px-4 py-3 font-medium text-right">Impressions</th>
+                  <th className="px-4 py-3 font-medium text-right">Clicks</th>
+                  <th className="px-4 py-3 font-medium text-right">CTR</th>
+                  <th className="px-4 py-3 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                {ads.map((ad) => {
+                  const ctr = ad.impressions > 0 ? ((ad.clicks / ad.impressions) * 100).toFixed(1) : '0.0';
+                  return (
+                    <tr key={ad.id} className="hover:bg-zinc-50/70 dark:hover:bg-zinc-800/30">
+                      <td className="px-4 py-3 max-w-md">
+                        <div className="font-semibold text-zinc-900 dark:text-zinc-100">
+                          {ad.advertiserName} · <span className="font-normal text-zinc-500">{ad.categoryLabel}</span>
+                        </div>
+                        <div className="text-zinc-700 dark:text-zinc-300 mt-0.5">{ad.headline}</div>
+                        <a
+                          href={ad.targetUrl}
+                          target="_blank"
+                          rel="noopener noreferrer sponsored"
+                          className="inline-flex items-center gap-1 text-[11px] font-mono text-zinc-500 hover:text-blue-600 mt-0.5 break-all"
+                        >
+                          <span>{ad.targetUrl}</span>
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                        </a>
+                      </td>
+                      <td className="px-4 py-3 capitalize font-mono text-zinc-700 dark:text-zinc-300">
+                        {ad.slot}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`font-medium ${
+                            !ad.active
+                              ? 'text-zinc-500 dark:text-zinc-400'
+                              : ad.lastStatus === 'ok'
+                              ? 'text-emerald-700 dark:text-emerald-400'
+                              : ad.lastStatus === 'error'
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-amber-700 dark:text-amber-400'
+                          }`}
+                        >
+                          {!ad.active
+                            ? 'Paused'
+                            : ad.lastStatus === 'ok'
+                            ? 'Verified'
+                            : ad.lastStatus === 'error'
+                            ? 'Check URL'
+                            : 'Pending'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono tabular-nums text-zinc-800 dark:text-zinc-200">
+                        {ad.impressions}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono tabular-nums text-zinc-800 dark:text-zinc-200">
+                        {ad.clicks}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono tabular-nums text-zinc-600 dark:text-zinc-400">
+                        {ctr}%
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={busyAction !== null}
+                            onClick={() =>
+                              runAdminAction(`slot-ad-${ad.id}`, async () => {
+                                const nextSlot = ad.slot === 'inline' ? 'sidebar' : 'inline';
+                                const res = await fetch(`/api/admin/ads/${ad.id}`, {
+                                  method: 'PATCH',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    Authorization: `Bearer ${token}`,
+                                  },
+                                  body: JSON.stringify({ slot: nextSlot }),
+                                });
+                                if (!res.ok) throw new Error('Failed to switch slot');
+                              })
+                            }
+                            className="rounded border border-zinc-200 dark:border-zinc-800 px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 whitespace-nowrap"
+                          >
+                            Move to {ad.slot === 'inline' ? 'Sidebar' : 'Inline'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyAction !== null}
+                            onClick={() =>
+                              runAdminAction(`toggle-ad-${ad.id}`, async () => {
+                                const res = await fetch(`/api/admin/ads/${ad.id}`, {
+                                  method: 'PATCH',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    Authorization: `Bearer ${token}`,
+                                  },
+                                  body: JSON.stringify({ active: !ad.active }),
+                                });
+                                if (!res.ok) throw new Error('Failed to toggle ad');
+                              })
+                            }
+                            className="rounded border border-zinc-200 dark:border-zinc-800 px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 whitespace-nowrap"
+                          >
+                            {ad.active ? 'Pause' : 'Resume'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyAction !== null}
+                            onClick={() =>
+                              runAdminAction(`del-ad-${ad.id}`, async () => {
+                                const res = await fetch(`/api/admin/ads/${ad.id}`, {
+                                  method: 'DELETE',
+                                  headers: { Authorization: `Bearer ${token}` },
+                                });
+                                if (!res.ok) throw new Error('Failed to delete ad');
+                              })
+                            }
+                            aria-label={`Delete ${ad.advertiserName}`}
+                            className="rounded border border-red-200 dark:border-red-900/60 p-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* Tab 4: Activity Log */}
       {tab === 'logs' && (
         <section className="space-y-4">
           <div className="flex items-center gap-1.5">
