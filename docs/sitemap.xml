@@ -6,14 +6,20 @@
     <priority>1.0</priority>
   </url>
   <url>
+    <loc>https://mrs-auto-blog.github.io/post/camellia-shop-features-update</loc>
+    <lastmod>2026-11-28T05:24:44.784Z</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://mrs-auto-blog.github.io/post/charity-project-spotlight</loc>
-    <lastmod>2026-11-28T05:15:13.304Z</lastmod>
+    <lastmod>2026-11-28T05:24:34.784Z</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://mrs-auto-blog.github.io/post/camellia-ai-spotlight</loc>
-    <lastmod>2026-11-28T05:15:04.942Z</lastmod>
+    <lastmod>2026-11-28T05:24:34.388Z</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>

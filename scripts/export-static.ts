@@ -186,6 +186,10 @@ async function main(): Promise<void> {
       })
       .join('\n');
 
+    const latestTs =
+      exportedPosts.length > 0
+        ? new Date(exportedPosts[0].updatedAt || exportedPosts[0].publishedAt).toUTCString()
+        : new Date().toUTCString();
     const rssXml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
   <channel>
@@ -193,6 +197,7 @@ async function main(): Promise<void> {
     <link>${escapeXml(baseUrl)}</link>
     <description>Automated editorial publication tracking updates and innovations across monitored websites.</description>
     <language>en-us</language>
+    <lastBuildDate>${latestTs}</lastBuildDate>
     <atom:link href="${escapeXml(baseUrl)}/rss.xml" rel="self" type="application/rss+xml" />
 ${rssItemsXml}
   </channel>

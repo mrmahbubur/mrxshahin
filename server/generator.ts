@@ -159,8 +159,18 @@ function truncateAtWordBoundary(text: string, maxLen: number): string {
   if (clean.length <= maxLen) return clean;
   const sliced = clean.slice(0, maxLen);
   const lastSpace = sliced.lastIndexOf(' ');
-  const candidate = lastSpace > Math.floor(maxLen * 0.55) ? sliced.slice(0, lastSpace) : sliced;
-  return candidate.replace(/[,:;\-–—&\s]+$/, '').trim();
+  let candidate = lastSpace > Math.floor(maxLen * 0.55) ? sliced.slice(0, lastSpace) : sliced;
+  candidate = candidate.replace(/[,:;\-–—&$\s]+$/, '').trim();
+  // Strip trailing dangling connectors or articles left by truncation
+  for (let i = 0; i < 3; i++) {
+    const stripped = candidate
+      .replace(/\s+(?:and|or|but|at|for|with|of|to|in|on|by|from|into|as|the|a|an)$/i, '')
+      .replace(/[,:;\-–—&$\s]+$/, '')
+      .trim();
+    if (stripped === candidate || stripped.length < Math.floor(maxLen * 0.45)) break;
+    candidate = stripped;
+  }
+  return candidate;
 }
 
 function formatShortDateText(rawDate: string): string {
@@ -212,21 +222,31 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
       ? `${report.siteName}: ${report.newRssItems[0].title}`
       : report.newHeadings[0]
         ? `${report.siteName}: ${report.newHeadings[0]} & Featured Highlights`
-        : `${report.siteName}: ${pageTitle} — Latest Features & Updates`;
+        : pageTitle.toLowerCase().startsWith(report.siteName.toLowerCase())
+          ? `${pageTitle} — Latest Features & Updates`
+          : `${report.siteName}: ${pageTitle} — Latest Features & Updates`;
   const rawTitle = truncateAtWordBoundary(combinedHeadline, 96);
   const title = rawTitle.length >= 16 ? rawTitle : `${report.siteName}: ${pageTitle}`;
 
   const slug = slugify(`${report.siteName}-${report.isInitial ? 'spotlight' : 'features-update'}`);
-  const summarySentences = [
-    report.isInitial
-      ? `${report.siteName} brings together ${pageTitle} at ${report.siteUrl}.`
-      : `Explore the latest features, releases, and updates now live on ${report.siteName}: ${report.reason}.`,
+  const firstSummarySentence = report.isInitial
+    ? pageTitle.toLowerCase().includes(report.siteName.toLowerCase())
+      ? `${pageTitle} is now featured on M R S Auto Blog.`
+      : `${report.siteName} features ${pageTitle}.`
+    : `Explore the latest updates on ${report.siteName}: ${report.reason}.`;
+  const remainingBudget = Math.max(120, 278 - firstSummarySentence.length);
+  const secondSummarySentence =
     pageDesc.length > 20
-      ? truncateAtWordBoundary(pageDesc, 175).replace(/[.!?\s]+$/, '') + '.'
-      : `Discover verified apps, channels, guides, and tools available directly on ${report.siteName}.`,
-  ];
-  const summary = summarySentences.join(' ').slice(0, 280);
-  const metaDescription = truncateAtWordBoundary(`${report.siteName} — ${pageDesc}`, 158);
+      ? truncateAtWordBoundary(pageDesc, remainingBudget).replace(/[.!?\s]+$/, '') + '.'
+      : `Discover verified apps, channels, guides, and tools available directly on ${report.siteName}.`;
+  const summary = truncateAtWordBoundary(`${firstSummarySentence} ${secondSummarySentence}`, 285).replace(/[.!?\s]+$/, '') + '.';
+  const normalizedSiteToken = report.siteName.toLowerCase().replace(/\s+/g, '');
+  const normalizedDescToken = pageDesc.toLowerCase().replace(/\s+/g, '');
+  const metaCandidate =
+    normalizedDescToken.includes(normalizedSiteToken) || pageDesc.length >= 125
+      ? pageDesc
+      : `${report.siteName} — ${pageDesc}`;
+  const metaDescription = truncateAtWordBoundary(metaCandidate, 158);
 
   // Extract distinct observed innovation statements & facts from live text
   const rawInnovationSource = /free apk hosting service for upload and download apps/i.test(report.currentMetaDescription)
