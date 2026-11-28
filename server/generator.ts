@@ -13,6 +13,8 @@ import { getGeminiApiKey } from './env.ts';
 import { emitPublicPostPublished, emitPublicPostUpdated } from './events.ts';
 import { sanitizePostHtml, slugify } from './security.ts';
 import {
+  escapeHtmlText,
+  estimateReadingTime,
   formatEditorialTitle,
   formatMetaDescription,
   formatSummaryText,
@@ -43,13 +45,6 @@ function getAiClient(): GoogleGenAI {
       },
     },
   });
-}
-
-function estimateReadingTime(html: string): number {
-  const $ = cheerio.load(html);
-  const text = $.text().trim();
-  const words = text.split(/\s+/).filter(Boolean).length;
-  return Math.max(1, Math.ceil(words / 220));
 }
 
 function resolveEditorialCategory(siteName: string, report?: ChangeReport): string {
@@ -125,15 +120,6 @@ OUTPUT REQUIREMENTS:
 - summary: Exactly 2 crisp sentences summarizing the update for the post card.
 - tags: 3 to 5 relevant lowercase tags.
 - contentHtml: Complete sanitized-ready editorial HTML body.`;
-}
-
-function escapeHtmlText(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function isTransientAiError(err: unknown): boolean {

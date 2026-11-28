@@ -17,6 +17,8 @@ import {
 import { getGithubToken } from './env.ts';
 import { generateAndSavePostFromReport } from './generator.ts';
 import { normalizeExternalUrl, safeFetchText } from './security.ts';
+import { normalizeTextForDiff, tokenJaccardSimilarity } from './textUtils.ts';
+export { normalizeTextForDiff };
 import type {
   ChangeReport,
   GithubActivity,
@@ -123,21 +125,6 @@ function deriveSiteName(anchorText: string, siteUrl: string): string {
   } catch {
     return siteUrl;
   }
-}
-
-export function normalizeTextForDiff(raw: string): string {
-  return raw
-    // Strip ISO dates and common timestamps
-    .replace(/\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}(?:[T\s]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?\b/g, ' ')
-    // Strip relative time strings ("5 minutes ago", "2 hours ago")
-    .replace(/\b\d+\s+(?:second|seconds|minute|minutes|hour|hours|day|days|week|weeks)\s+ago\b/gi, ' ')
-    // Strip copyright years
-    .replace(/©\s*20\d{2}(?:\s*-\s*20\d{2})?/g, ' ')
-    // Strip simple visitor/view counters
-    .replace(/\b\d[\d,]*\s+(?:views|visitors|online|reads|hits)\b/gi, ' ')
-    // Collapse whitespace
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function extractThemeColor($: cheerio.CheerioAPI): string | null {
@@ -812,20 +799,6 @@ function computeSnapshotHash(data: {
     githubReleases: data.githubData?.releases.map((r) => r.tagName) ?? [],
   });
   return crypto.createHash('sha256').update(canonical).digest('hex');
-}
-
-function tokenJaccardSimilarity(a: string, b: string): number {
-  const tokensA = new Set(a.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
-  const tokensB = new Set(b.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
-  if (tokensA.size === 0 && tokensB.size === 0) return 1;
-  if (tokensA.size === 0 || tokensB.size === 0) return 0;
-
-  let intersection = 0;
-  for (const t of tokensA) {
-    if (tokensB.has(t)) intersection++;
-  }
-  const union = tokensA.size + tokensB.size - intersection;
-  return union === 0 ? 1 : intersection / union;
 }
 
 function isSystemicPagePath(rawUrl: string): boolean {

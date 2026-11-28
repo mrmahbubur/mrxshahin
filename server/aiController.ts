@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
-import * as cheerio from 'cheerio';
 import {
   addLog,
   getAdminStats,
@@ -23,6 +22,8 @@ import { emitPublicPostPublished, emitPublicPostUpdated } from './events.ts';
 import { checkSingleSite, runMonitoringCycle, syncHubSitesOnly } from './monitor.ts';
 import { validateExternalUrl, validateSlug } from './security.ts';
 import {
+  estimateReadingTime,
+  extractPlainText,
   formatEditorialTitle,
   formatMetaDescription,
   formatSummaryText,
@@ -354,8 +355,7 @@ export async function runAiMaintenanceAndControl(
     }
 
     const postsNeedingMetaRepair = posts.filter((p) => {
-      const words = cheerio.load(p.contentHtml).text().trim().split(/\s+/).filter(Boolean).length;
-      const expectedReadingTime = Math.max(1, Math.ceil(words / 220));
+      const expectedReadingTime = estimateReadingTime(p.contentHtml);
       return (
         hasTrailingConnectorOrPreposition(p.title) ||
         !p.metaDescription ||
@@ -480,9 +480,8 @@ export async function runAiMaintenanceAndControl(
       if (evaluation.actions.includes('repair_post_metadata') && postsNeedingMetaRepair.length > 0) {
         let repairedCount = 0;
         for (const post of postsNeedingMetaRepair) {
-          const plainText = cheerio.load(post.contentHtml).text().replace(/\s+/g, ' ').trim();
-          const words = plainText.split(/\s+/).filter(Boolean).length;
-          const expectedReadingTime = Math.max(1, Math.ceil(words / 220));
+          const plainText = extractPlainText(post.contentHtml);
+          const expectedReadingTime = estimateReadingTime(post.contentHtml);
           const patch: Parameters<typeof updatePost>[1] = {};
 
           if (hasTrailingConnectorOrPreposition(post.title)) {
@@ -529,7 +528,7 @@ export async function runAiMaintenanceAndControl(
       if (evaluation.actions.includes('promote_ready_drafts') && !stats.draftMode) {
         const readyDrafts = posts.filter((p) => {
           if (p.status !== 'draft') return false;
-          const words = cheerio.load(p.contentHtml).text().trim().split(/\s+/).filter(Boolean).length;
+          const words = extractPlainText(p.contentHtml).split(/\s+/).filter(Boolean).length;
           return p.title.trim().length >= 8 && words >= 80;
         });
 

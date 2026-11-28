@@ -1,3 +1,5 @@
+import * as cheerio from 'cheerio';
+
 const TRAILING_CONNECTOR_SYMBOL_RE = /[,:;|/·+\-–—&$£€#…\s]+$/;
 
 const TRAILING_MULTIWORD_CONNECTOR_RE =
@@ -71,4 +73,53 @@ export function formatSummaryText(rawSummary: string, maxLen = 285): string {
 
 export function formatMetaDescription(rawMeta: string, maxLen = 158): string {
   return truncateAtWordBoundary(rawMeta, maxLen).replace(/[,:;\-–—\s]+$/, '').trim();
+}
+
+export function escapeHtmlText(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export function extractPlainText(html: string): string {
+  const $ = cheerio.load(html);
+  return normalizeSpaces($.text());
+}
+
+export function estimateReadingTime(html: string): number {
+  const text = extractPlainText(html);
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.ceil(words / 220));
+}
+
+export function normalizeTextForDiff(raw: string): string {
+  return raw
+    // Strip ISO dates and common timestamps
+    .replace(/\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}(?:[T\s]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?\b/g, ' ')
+    // Strip relative time strings ("5 minutes ago", "2 hours ago")
+    .replace(/\b\d+\s+(?:second|seconds|minute|minutes|hour|hours|day|days|week|weeks)\s+ago\b/gi, ' ')
+    // Strip copyright years
+    .replace(/©\s*20\d{2}(?:\s*-\s*20\d{2})?/g, ' ')
+    // Strip simple visitor/view counters
+    .replace(/\b\d[\d,]*\s+(?:views|visitors|online|reads|hits)\b/gi, ' ')
+    // Collapse whitespace
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function tokenJaccardSimilarity(a: string, b: string): number {
+  const tokensA = new Set(a.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
+  const tokensB = new Set(b.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
+  if (tokensA.size === 0 && tokensB.size === 0) return 1;
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+
+  let intersection = 0;
+  for (const t of tokensA) {
+    if (tokensB.has(t)) intersection++;
+  }
+  const union = tokensA.size + tokensB.size - intersection;
+  return union === 0 ? 1 : intersection / union;
 }
