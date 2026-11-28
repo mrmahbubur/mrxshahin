@@ -19,6 +19,7 @@ import { generateAndSavePostFromReport } from './generator.ts';
 import { normalizeExternalUrl, safeFetchText } from './security.ts';
 import {
   countWords,
+  extractPlainText,
   normalizeSpaces,
   normalizeTextForDiff,
   tokenJaccardSimilarity,
@@ -103,11 +104,9 @@ const UPPERCASE_SITE_TOKENS = new Set([
 ]);
 
 function deriveSiteName(anchorText: string, siteUrl: string): string {
-  const cleaned = anchorText
-    .replace(/[→↗◀▶›»]+/g, ' ')
-    .replace(/\s+\d{6,}$/, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const cleaned = normalizeSpaces(
+    anchorText.replace(/[→↗◀▶›»]+/g, ' ').replace(/\s+\d{6,}$/, '')
+  );
   const genericWords = new Set(['visit', 'open', 'launch', 'view', 'live', 'demo', 'website', 'link', 'here', 'app', 'try']);
   if (cleaned.length >= 3 && cleaned.length <= 55 && !genericWords.has(cleaned.toLowerCase())) {
     return cleaned;
@@ -267,7 +266,7 @@ function extractJsonLdSignals($: cheerio.CheerioAPI): {
     .filter(Boolean);
 
   return {
-    facts: Array.from(new Set(facts.map((f) => f.replace(/\s+/g, ' ').trim()).filter(Boolean))),
+    facts: Array.from(new Set(facts.map((f) => normalizeSpaces(f)).filter(Boolean))),
     sameAsUrls: Array.from(new Set(normalizedSameAs)),
     fallbackTitle,
     fallbackDescription,
@@ -291,22 +290,18 @@ function extractPageSignals(html: string, baseUrl: string): {
 
   const jsonLd = extractJsonLdSignals($);
 
-  const title = (
+  const title = normalizeSpaces(
     $('title').first().text() ||
-    $('meta[property="og:title"]').attr('content') ||
-    jsonLd.fallbackTitle ||
-    ''
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
-  const metaDescription = (
+      $('meta[property="og:title"]').attr('content') ||
+      jsonLd.fallbackTitle ||
+      ''
+  );
+  const metaDescription = normalizeSpaces(
     $('meta[name="description"]').attr('content') ||
-    $('meta[property="og:description"]').attr('content') ||
-    jsonLd.fallbackDescription ||
-    ''
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
+      $('meta[property="og:description"]').attr('content') ||
+      jsonLd.fallbackDescription ||
+      ''
+  );
 
   // Discover feed/sitemap links
   let discoveredRssUrl: string | null = null;
@@ -337,7 +332,7 @@ function extractPageSignals(html: string, baseUrl: string): {
   // Nav items
   const navSet = new Set<string>();
   $('header a, nav a').each((_, el) => {
-    const t = $(el).text().replace(/\s+/g, ' ').trim();
+    const t = normalizeSpaces($(el).text());
     if (t && t.length <= 45) navSet.add(t);
   });
 
@@ -348,7 +343,7 @@ function extractPageSignals(html: string, baseUrl: string): {
     if ($(el).closest('nav, aside, footer, .sidebar, #sidebar, [role="complementary"]').length > 0) {
       return;
     }
-    const text = $(el).text().replace(/\s+/g, ' ').trim();
+    const text = normalizeSpaces($(el).text());
     const level = el.tagName.toLowerCase();
     const key = `${level}:${text}`;
     if (text && text.length <= 180 && !NOISE_HEADINGS.has(text.toLowerCase()) && !seenHeadings.has(key)) {
@@ -376,7 +371,7 @@ function extractPageSignals(html: string, baseUrl: string): {
 
   $('img').each((_, el) => {
     const src = $(el).attr('src');
-    const alt = ($(el).attr('alt') || '').replace(/\s+/g, ' ').trim();
+    const alt = normalizeSpaces($(el).attr('alt') || '');
     if (src && !src.startsWith('data:')) {
       try {
         const abs = normalizeUrl(new URL(src, baseUrl).toString());
@@ -395,7 +390,7 @@ function extractPageSignals(html: string, baseUrl: string): {
   const seenLinks = new Set<string>();
   $('a[href]').each((_, el) => {
     const href = $(el).attr('href');
-    const text = $(el).text().replace(/\s+/g, ' ').trim();
+    const text = normalizeSpaces($(el).text());
     if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) {
       return;
     }
@@ -410,7 +405,7 @@ function extractPageSignals(html: string, baseUrl: string): {
     }
   });
 
-  const metaKeywords = ($('meta[name="keywords"]').attr('content') || '').replace(/\s+/g, ' ').trim();
+  const metaKeywords = normalizeSpaces($('meta[name="keywords"]').attr('content') || '');
   const structuredFacts = jsonLd.facts;
 
   // Remove non-content, form, modal, cookie, share, comment & ad/script chrome before extracting main text
@@ -420,35 +415,34 @@ function extractPageSignals(html: string, baseUrl: string): {
 
   const mainRoot = $('main, article, [role="main"]').first();
   const rawMainText = (mainRoot.length ? mainRoot.text() : $('body').text()) || '';
-  let mainText = normalizeTextForDiff(rawMainText)
-    .replace(/\bPlease Wait \d+ Seconds Download now with upload apk for free\b/gi, ' ')
-    .replace(/\bEnglish(?:\s+English)?\s+Sign In\s+Sign Up\b/gi, ' ')
-    .replace(/\bShare\s+Report\s+©?\s*Upload APK\s*-\s*All rights reserved\.?/gi, ' ')
-    .replace(/\bShare\s+Post a Comment\s+Read more\b/gi, ' ')
-    .replace(/\bSubscribe to:\s*Posts\s*\(Atom\)/gi, ' ')
-    .replace(/\bPowered by Blogger\.?/gi, ' ')
-    .replace(/\bReport Abuse\b/gi, ' ')
-    .replace(/\bMore posts\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 30000);
+  let mainText = normalizeSpaces(
+    normalizeTextForDiff(rawMainText)
+      .replace(/\bPlease Wait \d+ Seconds Download now with upload apk for free\b/gi, ' ')
+      .replace(/\bEnglish(?:\s+English)?\s+Sign In\s+Sign Up\b/gi, ' ')
+      .replace(/\bShare\s+Report\s+©?\s*Upload APK\s*-\s*All rights reserved\.?/gi, ' ')
+      .replace(/\bShare\s+Post a Comment\s+Read more\b/gi, ' ')
+      .replace(/\bSubscribe to:\s*Posts\s*\(Atom\)/gi, ' ')
+      .replace(/\bPowered by Blogger\.?/gi, ' ')
+      .replace(/\bReport Abuse\b/gi, ' ')
+      .replace(/\bMore posts\b/gi, ' ')
+  ).slice(0, 30000);
   if (mainText.length < 180 || structuredFacts.length > 0) {
     const isGenericUploadHost = /free apk hosting service for upload and download apps/i.test(metaDescription);
     const cleanedMeta = isGenericUploadHost ? '' : metaDescription;
     const fallbackStructured = Array.from(
       new Set(
         [cleanedMeta, ...structuredFacts, !isGenericUploadHost && metaKeywords ? `Focus & Topics: ${metaKeywords}` : '']
-          .map((s) => s.trim())
+          .map((s) => normalizeSpaces(s))
           .filter(Boolean)
       )
     ).join(' ');
     if (fallbackStructured) {
       const baseText = isGenericUploadHost
-        ? mainText
-            .replace(/Free APK hosting service for Upload and Download apps[^.]*\./gi, ' ')
-            .replace(/Offers integration solutions for uploading apks[^.]*\./gi, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
+        ? normalizeSpaces(
+            mainText
+              .replace(/Free APK hosting service for Upload and Download apps[^.]*\./gi, ' ')
+              .replace(/Offers integration solutions for uploading apks[^.]*\./gi, ' ')
+          )
         : mainText;
       mainText = normalizeTextForDiff(
         baseText.length < 80 ? fallbackStructured : `${baseText} ${fallbackStructured}`
@@ -510,12 +504,15 @@ async function enrichSpaSignals(
         shortcuts?: Array<{ name?: string; description?: string }>;
       };
       if (manifest.description && isReadableSpaSentence(manifest.description)) {
-        extraParagraphs.push(manifest.description);
+        extraParagraphs.push(normalizeSpaces(manifest.description));
       }
       if (Array.isArray(manifest.shortcuts)) {
         for (const sc of manifest.shortcuts.slice(0, 8)) {
-          if (sc.name && sc.name.trim().length >= 3) extraHeadings.push(sc.name.trim());
-          if (sc.description && isReadableSpaSentence(sc.description)) extraParagraphs.push(sc.description);
+          const shortcutName = sc.name ? normalizeSpaces(sc.name) : '';
+          if (shortcutName.length >= 3) extraHeadings.push(shortcutName);
+          if (sc.description && isReadableSpaSentence(sc.description)) {
+            extraParagraphs.push(normalizeSpaces(sc.description));
+          }
         }
       }
     }
@@ -575,7 +572,7 @@ async function enrichSpaSignals(
     }
   }
 
-  const dedupedCopy = Array.from(new Set(extraParagraphs.map((p) => p.trim()).filter(Boolean))).join('. ');
+  const dedupedCopy = Array.from(new Set(extraParagraphs.map((p) => normalizeSpaces(p)).filter(Boolean))).join('. ');
   if (dedupedCopy) {
     signals.mainText = normalizeTextForDiff(
       signals.mainText ? `${signals.mainText}. ${dedupedCopy}` : dedupedCopy
@@ -687,10 +684,10 @@ async function fetchRssItems(rssUrl: string): Promise<RssEntry[]> {
     };
 
     $('item').each((_, el) => {
-      const title = $(el).find('title').first().text().trim();
+      const title = normalizeSpaces($(el).find('title').first().text());
       const link = normalizeFeedLink($(el).find('link').first().text());
       const pubDate = $(el).find('pubDate').first().text().trim();
-      const desc = $(el).find('description').first().text().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const desc = extractPlainText($(el).find('description').first().text());
       if (title) {
         items.push({ title, link, pubDate, summary: desc.slice(0, 400) });
       }
@@ -698,10 +695,10 @@ async function fetchRssItems(rssUrl: string): Promise<RssEntry[]> {
 
     if (items.length === 0) {
       $('entry').each((_, el) => {
-        const title = $(el).find('title').first().text().trim();
+        const title = normalizeSpaces($(el).find('title').first().text());
         const link = normalizeFeedLink($(el).find('link').first().attr('href') || '');
         const pubDate = $(el).find('updated, published').first().text().trim();
-        const desc = $(el).find('summary, content').first().text().replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        const desc = extractPlainText($(el).find('summary, content').first().text());
         if (title) {
           items.push({ title, link, pubDate, summary: desc.slice(0, 400) });
         }
