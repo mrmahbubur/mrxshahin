@@ -154,20 +154,39 @@ function isTransientAiError(err: unknown): boolean {
   );
 }
 
-function truncateAtWordBoundary(text: string, maxLen: number): string {
+const TRAILING_PUNCT_OR_CONNECTOR_SYMBOL_RE = /[,:;|/·+\-–—&$\s]+$/;
+const TRAILING_DANGLING_WORD_RE =
+  /\s+(?:and|or|but|nor|yet|so|at|for|with|of|to|in|on|by|from|into|onto|upon|as|via|about|over|under|through|across|between|among|during|without|within|after|before|until|using|the|a|an)$/i;
+
+export function hasTrailingConnectorOrPreposition(text: string): boolean {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
+  if (/\$$/.test(normalized)) return true;
+  const withoutSentenceEnd = normalized.replace(/[.!?]+$/, '').trim();
+  return (
+    TRAILING_PUNCT_OR_CONNECTOR_SYMBOL_RE.test(withoutSentenceEnd) ||
+    TRAILING_DANGLING_WORD_RE.test(withoutSentenceEnd)
+  );
+}
+
+export function truncateAtWordBoundary(text: string, maxLen: number): string {
   const clean = text.replace(/\s+/g, ' ').trim();
-  if (clean.length <= maxLen) return clean;
-  const sliced = clean.slice(0, maxLen);
-  const lastSpace = sliced.lastIndexOf(' ');
-  let candidate = lastSpace > Math.floor(maxLen * 0.55) ? sliced.slice(0, lastSpace) : sliced;
-  candidate = candidate.replace(/[,:;\-–—&$\s]+$/, '').trim();
-  // Strip trailing dangling connectors or articles left by truncation
-  for (let i = 0; i < 3; i++) {
+  if (!clean) return '';
+  let candidate = clean;
+  if (clean.length > maxLen) {
+    const sliced = clean.slice(0, maxLen);
+    const lastSpace = sliced.lastIndexOf(' ');
+    candidate = lastSpace > Math.floor(maxLen * 0.5) ? sliced.slice(0, lastSpace) : sliced;
+  }
+  candidate = candidate.replace(TRAILING_PUNCT_OR_CONNECTOR_SYMBOL_RE, '').trim();
+  // Strip trailing dangling connectors, prepositions, or articles left by truncation
+  const minSafeLen = clean.length > maxLen ? Math.floor(maxLen * 0.4) : 12;
+  for (let i = 0; i < 4; i++) {
     const stripped = candidate
-      .replace(/\s+(?:and|or|but|at|for|with|of|to|in|on|by|from|into|as|the|a|an)$/i, '')
-      .replace(/[,:;\-–—&$\s]+$/, '')
+      .replace(TRAILING_DANGLING_WORD_RE, '')
+      .replace(TRAILING_PUNCT_OR_CONNECTOR_SYMBOL_RE, '')
       .trim();
-    if (stripped === candidate || stripped.length < Math.floor(maxLen * 0.45)) break;
+    if (stripped === candidate || stripped.length < minSafeLen) break;
     candidate = stripped;
   }
   return candidate;
@@ -531,13 +550,26 @@ async function callGeminiForArticle(
     };
   }
 
+  const cleanAiTitle = truncateAtWordBoundary(String(parsed.title), 96) || String(parsed.title).trim();
+  const cleanAiSummaryRaw = truncateAtWordBoundary(
+    String(parsed.summary || parsed.metaDescription || cleanAiTitle),
+    285
+  );
+  const cleanAiSummary = cleanAiSummaryRaw
+    ? `${cleanAiSummaryRaw.replace(/[.!?\s]+$/, '')}.`
+    : `${cleanAiTitle}.`;
+  const cleanAiMeta = truncateAtWordBoundary(
+    String(parsed.metaDescription || cleanAiSummary || cleanAiTitle),
+    158
+  );
+
   return {
     usedAiAuthoring: true,
     article: {
-      title: String(parsed.title).trim(),
-      slug: slugify(parsed.slug || parsed.title),
-      metaDescription: String(parsed.metaDescription || parsed.summary || parsed.title).trim().slice(0, 170),
-      summary: String(parsed.summary || parsed.metaDescription || parsed.title).trim(),
+      title: cleanAiTitle,
+      slug: slugify(parsed.slug || cleanAiTitle),
+      metaDescription: cleanAiMeta,
+      summary: cleanAiSummary,
       tags: Array.isArray(parsed.tags)
         ? parsed.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean).slice(0, 6)
         : [slugify(report.siteName)],

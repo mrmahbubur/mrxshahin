@@ -232,22 +232,22 @@ export default function App() {
       </div>
 
       <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14]">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-10 sm:py-12 text-sm text-zinc-600 dark:text-zinc-400">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-10 sm:py-12 text-zinc-600 dark:text-zinc-400">
           <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-8 md:gap-12 pb-8">
             <div className="max-w-lg space-y-2.5">
-              <p className="font-display text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+              <p className="font-display text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
                 M R S Auto Blog
               </p>
-              <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
+              <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-400">
                 Independent editorial coverage documenting verified software releases, live web platform capabilities, streaming channels, and technical guides as updates go live.
               </p>
             </div>
 
-            <nav aria-label="Footer sections" className="shrink-0 space-y-3 text-xs md:text-right">
-              <h2 className="font-semibold uppercase tracking-wider text-[11px] text-zinc-900 dark:text-zinc-100">
+            <nav aria-label="Footer sections" className="shrink-0 space-y-2.5 md:text-right">
+              <h2 className="font-semibold uppercase tracking-wider text-xs text-zinc-900 dark:text-zinc-100">
                 Sections
               </h2>
-              <ul className="flex flex-wrap items-center gap-x-6 gap-y-2.5 md:justify-end">
+              <ul className="flex flex-wrap items-center gap-x-6 gap-y-1.5 md:justify-end text-sm">
                 <li>
                   <a
                     href={toRouteHref('/')}
@@ -255,7 +255,7 @@ export default function App() {
                       e.preventDefault();
                       navigate('/');
                     }}
-                    className="inline-block py-0.5 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    className="inline-flex min-h-[36px] items-center rounded font-medium text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:focus-visible:ring-zinc-500 transition-colors"
                   >
                     Latest Dispatches
                   </a>
@@ -267,7 +267,7 @@ export default function App() {
                       e.preventDefault();
                       navigate('/#labels');
                     }}
-                    className="inline-block py-0.5 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    className="inline-flex min-h-[36px] items-center rounded font-medium text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:focus-visible:ring-zinc-500 transition-colors"
                   >
                     Topic Labels
                   </a>
@@ -279,7 +279,7 @@ export default function App() {
                       e.preventDefault();
                       navigate('/#archive');
                     }}
-                    className="inline-block py-0.5 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    className="inline-flex min-h-[36px] items-center rounded font-medium text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 dark:focus-visible:ring-zinc-500 transition-colors"
                   >
                     Full Archive
                   </a>
@@ -288,7 +288,7 @@ export default function App() {
             </nav>
           </div>
 
-          <div className="border-t border-zinc-200/80 dark:border-zinc-800/80 pt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+          <div className="border-t border-zinc-200/80 dark:border-zinc-800/80 pt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
             <p>© {new Date().getFullYear()} M R S Auto Blog. All dispatches verified from live sources.</p>
             <p>Product updates, apps, AI features &amp; guides</p>
           </div>

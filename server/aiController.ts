@@ -20,6 +20,7 @@ import {
 } from './db.ts';
 import { getGeminiApiKey } from './env.ts';
 import { emitPublicPostPublished, emitPublicPostUpdated } from './events.ts';
+import { hasTrailingConnectorOrPreposition, truncateAtWordBoundary } from './generator.ts';
 import { checkSingleSite, runMonitoringCycle, syncHubSitesOnly } from './monitor.ts';
 import { validateExternalUrl, validateSlug } from './security.ts';
 import {
@@ -347,19 +348,17 @@ export async function runAiMaintenanceAndControl(
       }
     }
 
-    const hasDanglingEnd = (val: string) =>
-      /\s(?:and|or|but|at|for|with|of|to|in|by)\.?$|\$$/i.test(val.trim());
-
     const postsNeedingMetaRepair = posts.filter((p) => {
       const words = cheerio.load(p.contentHtml).text().trim().split(/\s+/).filter(Boolean).length;
       const expectedReadingTime = Math.max(1, Math.ceil(words / 220));
       return (
+        hasTrailingConnectorOrPreposition(p.title) ||
         !p.metaDescription ||
         p.metaDescription.trim().length < 20 ||
-        hasDanglingEnd(p.metaDescription) ||
+        hasTrailingConnectorOrPreposition(p.metaDescription) ||
         !p.summary ||
         p.summary.trim().length < 20 ||
-        hasDanglingEnd(p.summary) ||
+        hasTrailingConnectorOrPreposition(p.summary) ||
         p.readingTimeMinutes !== expectedReadingTime
       );
     });
@@ -474,24 +473,6 @@ export async function runAiMaintenanceAndControl(
       }
 
       if (evaluation.actions.includes('repair_post_metadata') && postsNeedingMetaRepair.length > 0) {
-        const cleanAtBoundary = (raw: string, maxLen: number): string => {
-          const clean = raw.replace(/\s+/g, ' ').trim();
-          if (clean.length <= maxLen && !hasDanglingEnd(clean)) return clean;
-          const sliced = clean.slice(0, maxLen);
-          const lastSpace = sliced.lastIndexOf(' ');
-          let out = lastSpace > Math.floor(maxLen * 0.55) ? sliced.slice(0, lastSpace) : sliced;
-          out = out.replace(/[,:;\-–—&$\s]+$/, '').trim();
-          for (let i = 0; i < 3; i++) {
-            const stripped = out
-              .replace(/\s+(?:and|or|but|at|for|with|of|to|in|on|by|from|into|as|the|a|an)\.?$/i, '')
-              .replace(/[,:;\-–—&$\s]+$/, '')
-              .trim();
-            if (stripped === out || stripped.length < Math.floor(maxLen * 0.45)) break;
-            out = stripped;
-          }
-          return out;
-        };
-
         let repairedCount = 0;
         for (const post of postsNeedingMetaRepair) {
           const plainText = cheerio.load(post.contentHtml).text().replace(/\s+/g, ' ').trim();
@@ -499,17 +480,30 @@ export async function runAiMaintenanceAndControl(
           const expectedReadingTime = Math.max(1, Math.ceil(words / 220));
           const patch: Parameters<typeof updatePost>[1] = {};
 
-          if (!post.summary || post.summary.trim().length < 20 || hasDanglingEnd(post.summary)) {
-            const sourceSummary =
-              post.summary && post.summary.trim().length >= 20 ? post.summary : plainText || `${post.siteName}: ${post.title}`;
-            patch.summary = cleanAtBoundary(sourceSummary, 275).replace(/[.!?\s]+$/, '') + '.';
+          if (hasTrailingConnectorOrPreposition(post.title)) {
+            const cleanedTitle = truncateAtWordBoundary(post.title, 96);
+            if (cleanedTitle && cleanedTitle !== post.title) {
+              patch.title = cleanedTitle;
+            }
           }
-          if (!post.metaDescription || post.metaDescription.trim().length < 20 || hasDanglingEnd(post.metaDescription)) {
+          if (!post.summary || post.summary.trim().length < 20 || hasTrailingConnectorOrPreposition(post.summary)) {
+            const sourceSummary =
+              post.summary && post.summary.trim().length >= 20
+                ? post.summary
+                : plainText || `${post.siteName}: ${patch.title || post.title}`;
+            const cleanedSummary = truncateAtWordBoundary(sourceSummary, 285).replace(/[.!?\s]+$/, '');
+            patch.summary = `${cleanedSummary || sourceSummary.trim()}.`;
+          }
+          if (
+            !post.metaDescription ||
+            post.metaDescription.trim().length < 20 ||
+            hasTrailingConnectorOrPreposition(post.metaDescription)
+          ) {
             const sourceMeta =
               post.metaDescription && post.metaDescription.trim().length >= 20
                 ? post.metaDescription
-                : patch.summary || post.summary || post.title;
-            patch.metaDescription = cleanAtBoundary(sourceMeta, 158);
+                : patch.summary || post.summary || patch.title || post.title;
+            patch.metaDescription = truncateAtWordBoundary(sourceMeta, 158);
           }
           if (post.readingTimeMinutes !== expectedReadingTime) {
             patch.readingTimeMinutes = expectedReadingTime;
