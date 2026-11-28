@@ -233,7 +233,7 @@ export default function App() {
 
       <footer className="border-t border-zinc-200 dark:border-zinc-800 bg-[#FAF9F6] dark:bg-[#0B0E14]">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 py-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-8 items-start text-sm text-zinc-600 dark:text-zinc-400">
-          <div className="sm:col-span-2 md:col-span-6 space-y-2.5">
+          <div className="sm:col-span-1 md:col-span-8 space-y-2.5">
             <p className="font-display text-base font-semibold text-zinc-900 dark:text-zinc-100">
               M R S Auto Blog
             </p>
@@ -245,7 +245,7 @@ export default function App() {
             </p>
           </div>
 
-          <div className="md:col-span-3 space-y-2.5 text-xs">
+          <div className="md:col-span-4 space-y-2.5 text-xs">
             <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">Sections</h2>
             <ul className="space-y-2">
               <li>
@@ -282,32 +282,6 @@ export default function App() {
                   className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
                 >
                   Full Archive
-                </a>
-              </li>
-            </ul>
-          </div>
-
-          <div className="md:col-span-3 space-y-2.5 text-xs">
-            <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">Syndication</h2>
-            <ul className="space-y-2">
-              <li>
-                <a
-                  href={withBase('/rss.xml')}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
-                >
-                  RSS 2.0 Feed
-                </a>
-              </li>
-              <li>
-                <a
-                  href={withBase('/sitemap.xml')}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
-                >
-                  XML Sitemap
                 </a>
               </li>
             </ul>
