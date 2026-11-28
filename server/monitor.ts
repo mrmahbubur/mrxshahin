@@ -17,7 +17,7 @@ import {
 import { getGithubToken } from './env.ts';
 import { generateAndSavePostFromReport } from './generator.ts';
 import { normalizeExternalUrl, safeFetchText } from './security.ts';
-import { normalizeTextForDiff, tokenJaccardSimilarity } from './textUtils.ts';
+import { countWords, normalizeTextForDiff, tokenJaccardSimilarity } from './textUtils.ts';
 export { normalizeTextForDiff };
 import type {
   ChangeReport,
@@ -815,7 +815,7 @@ function buildChangeReport(
   siteHasAnyPosts: boolean
 ): ChangeReport {
   if (!previous) {
-    const wordCount = current.mainText.split(/\s+/).filter(Boolean).length;
+    const wordCount = countWords(current.mainText);
     const hasSubstance =
       wordCount >= 10 ||
       (current.metaDescription.length >= 20 && current.title.length >= 4) ||

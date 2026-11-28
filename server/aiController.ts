@@ -22,6 +22,7 @@ import { emitPublicPostPublished, emitPublicPostUpdated } from './events.ts';
 import { checkSingleSite, runMonitoringCycle, syncHubSitesOnly } from './monitor.ts';
 import { validateExternalUrl, validateSlug } from './security.ts';
 import {
+  countWords,
   estimateReadingTime,
   extractPlainText,
   formatEditorialTitle,
@@ -528,7 +529,7 @@ export async function runAiMaintenanceAndControl(
       if (evaluation.actions.includes('promote_ready_drafts') && !stats.draftMode) {
         const readyDrafts = posts.filter((p) => {
           if (p.status !== 'draft') return false;
-          const words = extractPlainText(p.contentHtml).split(/\s+/).filter(Boolean).length;
+          const words = countWords(extractPlainText(p.contentHtml));
           return p.title.trim().length >= 8 && words >= 80;
         });
 

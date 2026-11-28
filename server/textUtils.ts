@@ -8,11 +8,16 @@ const TRAILING_MULTIWORD_CONNECTOR_RE =
 const TRAILING_DANGLING_WORD_RE =
   /\s+(?:and|or|but|nor|yet|so|at|for|with|of|to|in|on|by|from|into|onto|upon|as|via|about|over|under|through|across|between|among|during|without|within|after|before|until|toward|towards|against|around|per|like|such|including|featuring|using|offering|providing|several|various|other|is|are|was|were|be|has|have|can|will|that|which|who|whose|the|a|an|its|their|your|our|this|these|those)$/i;
 
-function normalizeSpaces(input: string): string {
+export function normalizeSpaces(input: string): string {
   return input
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+export function countWords(text: string): number {
+  const clean = normalizeSpaces(text);
+  return clean ? clean.split(/\s+/).length : 0;
 }
 
 export function hasTrailingConnectorOrPreposition(text: string): boolean {
@@ -90,8 +95,7 @@ export function extractPlainText(html: string): string {
 }
 
 export function estimateReadingTime(html: string): number {
-  const text = extractPlainText(html);
-  const words = text.split(/\s+/).filter(Boolean).length;
+  const words = countWords(extractPlainText(html));
   return Math.max(1, Math.ceil(words / 220));
 }
 

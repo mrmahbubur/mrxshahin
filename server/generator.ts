@@ -1,5 +1,4 @@
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
-import * as cheerio from 'cheerio';
 import {
   addLog,
   createPost,
@@ -15,6 +14,7 @@ import { sanitizePostHtml, slugify } from './security.ts';
 import {
   escapeHtmlText,
   estimateReadingTime,
+  extractPlainText,
   formatEditorialTitle,
   formatMetaDescription,
   formatSummaryText,
@@ -630,7 +630,7 @@ export async function regeneratePostContent(postId: number): Promise<PostRecord>
     currentTitle: existing.title,
     currentMetaDescription: existing.metaDescription,
     currentHeadings: [],
-    currentMainTextExcerpt: cheerio.load(existing.contentHtml).text().slice(0, 4000),
+    currentMainTextExcerpt: extractPlainText(existing.contentHtml).slice(0, 4000),
   };
 
   const { article, usedAiAuthoring, fallbackReason: authoringFallback } = await callGeminiForArticle(report);
