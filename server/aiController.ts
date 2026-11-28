@@ -20,9 +20,14 @@ import {
 } from './db.ts';
 import { getGeminiApiKey } from './env.ts';
 import { emitPublicPostPublished, emitPublicPostUpdated } from './events.ts';
-import { hasTrailingConnectorOrPreposition, truncateAtWordBoundary } from './generator.ts';
 import { checkSingleSite, runMonitoringCycle, syncHubSitesOnly } from './monitor.ts';
 import { validateExternalUrl, validateSlug } from './security.ts';
+import {
+  formatEditorialTitle,
+  formatMetaDescription,
+  formatSummaryText,
+  hasTrailingConnectorOrPreposition,
+} from './textUtils.ts';
 import {
   buildFallbackThumbnailPng,
   getThumbnailCachePath,
@@ -481,7 +486,7 @@ export async function runAiMaintenanceAndControl(
           const patch: Parameters<typeof updatePost>[1] = {};
 
           if (hasTrailingConnectorOrPreposition(post.title)) {
-            const cleanedTitle = truncateAtWordBoundary(post.title, 96);
+            const cleanedTitle = formatEditorialTitle(post.title, 96);
             if (cleanedTitle && cleanedTitle !== post.title) {
               patch.title = cleanedTitle;
             }
@@ -491,8 +496,7 @@ export async function runAiMaintenanceAndControl(
               post.summary && post.summary.trim().length >= 20
                 ? post.summary
                 : plainText || `${post.siteName}: ${patch.title || post.title}`;
-            const cleanedSummary = truncateAtWordBoundary(sourceSummary, 285).replace(/[.!?\s]+$/, '');
-            patch.summary = `${cleanedSummary || sourceSummary.trim()}.`;
+            patch.summary = formatSummaryText(sourceSummary, 285) || `${sourceSummary.trim()}.`;
           }
           if (
             !post.metaDescription ||
@@ -503,7 +507,7 @@ export async function runAiMaintenanceAndControl(
               post.metaDescription && post.metaDescription.trim().length >= 20
                 ? post.metaDescription
                 : patch.summary || post.summary || patch.title || post.title;
-            patch.metaDescription = truncateAtWordBoundary(sourceMeta, 158);
+            patch.metaDescription = formatMetaDescription(sourceMeta, 158);
           }
           if (post.readingTimeMinutes !== expectedReadingTime) {
             patch.readingTimeMinutes = expectedReadingTime;

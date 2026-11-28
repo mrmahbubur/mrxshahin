@@ -12,6 +12,12 @@ import {
 import { getGeminiApiKey } from './env.ts';
 import { emitPublicPostPublished, emitPublicPostUpdated } from './events.ts';
 import { sanitizePostHtml, slugify } from './security.ts';
+import {
+  formatEditorialTitle,
+  formatMetaDescription,
+  formatSummaryText,
+  truncateAtWordBoundary,
+} from './textUtils.ts';
 import { generatePostThumbnail } from './thumbnails.ts';
 import type { ChangeReport, PostRecord, PostStatus } from './types.ts';
 
@@ -154,44 +160,6 @@ function isTransientAiError(err: unknown): boolean {
   );
 }
 
-const TRAILING_PUNCT_OR_CONNECTOR_SYMBOL_RE = /[,:;|/·+\-–—&$\s]+$/;
-const TRAILING_DANGLING_WORD_RE =
-  /\s+(?:and|or|but|nor|yet|so|at|for|with|of|to|in|on|by|from|into|onto|upon|as|via|about|over|under|through|across|between|among|during|without|within|after|before|until|using|the|a|an)$/i;
-
-export function hasTrailingConnectorOrPreposition(text: string): boolean {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  if (!normalized) return false;
-  if (/\$$/.test(normalized)) return true;
-  const withoutSentenceEnd = normalized.replace(/[.!?]+$/, '').trim();
-  return (
-    TRAILING_PUNCT_OR_CONNECTOR_SYMBOL_RE.test(withoutSentenceEnd) ||
-    TRAILING_DANGLING_WORD_RE.test(withoutSentenceEnd)
-  );
-}
-
-export function truncateAtWordBoundary(text: string, maxLen: number): string {
-  const clean = text.replace(/\s+/g, ' ').trim();
-  if (!clean) return '';
-  let candidate = clean;
-  if (clean.length > maxLen) {
-    const sliced = clean.slice(0, maxLen);
-    const lastSpace = sliced.lastIndexOf(' ');
-    candidate = lastSpace > Math.floor(maxLen * 0.5) ? sliced.slice(0, lastSpace) : sliced;
-  }
-  candidate = candidate.replace(TRAILING_PUNCT_OR_CONNECTOR_SYMBOL_RE, '').trim();
-  // Strip trailing dangling connectors, prepositions, or articles left by truncation
-  const minSafeLen = clean.length > maxLen ? Math.floor(maxLen * 0.4) : 12;
-  for (let i = 0; i < 4; i++) {
-    const stripped = candidate
-      .replace(TRAILING_DANGLING_WORD_RE, '')
-      .replace(TRAILING_PUNCT_OR_CONNECTOR_SYMBOL_RE, '')
-      .trim();
-    if (stripped === candidate || stripped.length < minSafeLen) break;
-    candidate = stripped;
-  }
-  return candidate;
-}
-
 function formatShortDateText(rawDate: string): string {
   if (!rawDate) return '';
   const parsed = new Date(rawDate);
@@ -244,8 +212,8 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
         : pageTitle.toLowerCase().startsWith(report.siteName.toLowerCase())
           ? `${pageTitle} — Latest Features & Updates`
           : `${report.siteName}: ${pageTitle} — Latest Features & Updates`;
-  const rawTitle = truncateAtWordBoundary(combinedHeadline, 96);
-  const title = rawTitle.length >= 16 ? rawTitle : `${report.siteName}: ${pageTitle}`;
+  const rawTitle = formatEditorialTitle(combinedHeadline, 96);
+  const title = rawTitle.length >= 16 ? rawTitle : formatEditorialTitle(`${report.siteName}: ${pageTitle}`, 96);
 
   const slug = slugify(`${report.siteName}-${report.isInitial ? 'spotlight' : 'features-update'}`);
   const firstSummarySentence = report.isInitial
@@ -256,16 +224,16 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
   const remainingBudget = Math.max(120, 278 - firstSummarySentence.length);
   const secondSummarySentence =
     pageDesc.length > 20
-      ? truncateAtWordBoundary(pageDesc, remainingBudget).replace(/[.!?\s]+$/, '') + '.'
+      ? formatSummaryText(pageDesc, remainingBudget)
       : `Discover verified apps, channels, guides, and tools available directly on ${report.siteName}.`;
-  const summary = truncateAtWordBoundary(`${firstSummarySentence} ${secondSummarySentence}`, 285).replace(/[.!?\s]+$/, '') + '.';
+  const summary = formatSummaryText(`${firstSummarySentence} ${secondSummarySentence}`, 285);
   const normalizedSiteToken = report.siteName.toLowerCase().replace(/\s+/g, '');
   const normalizedDescToken = pageDesc.toLowerCase().replace(/\s+/g, '');
   const metaCandidate =
     normalizedDescToken.includes(normalizedSiteToken) || pageDesc.length >= 125
       ? pageDesc
       : `${report.siteName} — ${pageDesc}`;
-  const metaDescription = truncateAtWordBoundary(metaCandidate, 158);
+  const metaDescription = formatMetaDescription(metaCandidate, 158);
 
   // Extract distinct observed innovation statements & facts from live text
   const rawInnovationSource = /free apk hosting service for upload and download apps/i.test(report.currentMetaDescription)
@@ -550,15 +518,12 @@ async function callGeminiForArticle(
     };
   }
 
-  const cleanAiTitle = truncateAtWordBoundary(String(parsed.title), 96) || String(parsed.title).trim();
-  const cleanAiSummaryRaw = truncateAtWordBoundary(
+  const cleanAiTitle = formatEditorialTitle(String(parsed.title), 96);
+  const cleanAiSummary = formatSummaryText(
     String(parsed.summary || parsed.metaDescription || cleanAiTitle),
     285
-  );
-  const cleanAiSummary = cleanAiSummaryRaw
-    ? `${cleanAiSummaryRaw.replace(/[.!?\s]+$/, '')}.`
-    : `${cleanAiTitle}.`;
-  const cleanAiMeta = truncateAtWordBoundary(
+  ) || `${cleanAiTitle}.`;
+  const cleanAiMeta = formatMetaDescription(
     String(parsed.metaDescription || cleanAiSummary || cleanAiTitle),
     158
   );
