@@ -100,18 +100,17 @@ export function estimateReadingTime(html: string): number {
 }
 
 export function normalizeTextForDiff(raw: string): string {
-  return raw
-    // Strip ISO dates and common timestamps
-    .replace(/\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}(?:[T\s]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?\b/g, ' ')
-    // Strip relative time strings ("5 minutes ago", "2 hours ago")
-    .replace(/\b\d+\s+(?:second|seconds|minute|minutes|hour|hours|day|days|week|weeks)\s+ago\b/gi, ' ')
-    // Strip copyright years
-    .replace(/©\s*20\d{2}(?:\s*-\s*20\d{2})?/g, ' ')
-    // Strip simple visitor/view counters
-    .replace(/\b\d[\d,]*\s+(?:views|visitors|online|reads|hits)\b/gi, ' ')
-    // Collapse whitespace
-    .replace(/\s+/g, ' ')
-    .trim();
+  return normalizeSpaces(
+    raw
+      // Strip ISO dates and common timestamps
+      .replace(/\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}(?:[T\s]\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?)?\b/g, ' ')
+      // Strip relative time strings ("5 minutes ago", "2 hours ago")
+      .replace(/\b\d+\s+(?:second|seconds|minute|minutes|hour|hours|day|days|week|weeks)\s+ago\b/gi, ' ')
+      // Strip copyright years
+      .replace(/©\s*20\d{2}(?:\s*-\s*20\d{2})?/g, ' ')
+      // Strip simple visitor/view counters
+      .replace(/\b\d[\d,]*\s+(?:views|visitors|online|reads|hits)\b/gi, ' ')
+  );
 }
 
 export function tokenJaccardSimilarity(a: string, b: string): number {

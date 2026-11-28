@@ -18,6 +18,7 @@ import {
   formatEditorialTitle,
   formatMetaDescription,
   formatSummaryText,
+  normalizeSpaces,
   truncateAtWordBoundary,
 } from './textUtils.ts';
 import { generatePostThumbnail } from './thumbnails.ts';
@@ -156,15 +157,15 @@ function formatShortDateText(rawDate: string): string {
 function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePayload {
   const siteNameEsc = escapeHtmlText(report.siteName);
   const siteUrlEsc = escapeHtmlText(report.siteUrl);
-  const pageTitle = report.currentTitle.trim() || report.siteName;
-  const rawMetaDesc = report.currentMetaDescription.trim();
+  const pageTitle = normalizeSpaces(report.currentTitle) || report.siteName;
+  const rawMetaDesc = normalizeSpaces(report.currentMetaDescription);
   const safeMetaDesc = /free apk hosting service for upload and download apps/i.test(rawMetaDesc)
     ? ''
     : rawMetaDesc;
   const pageDesc =
     safeMetaDesc ||
-    report.textDiffSnippet.trim() ||
-    report.currentMainTextExcerpt.split(/[.!?]+/).slice(0, 2).join('. ').trim() ||
+    normalizeSpaces(report.textDiffSnippet) ||
+    normalizeSpaces(report.currentMainTextExcerpt.split(/[.!?]+/).slice(0, 2).join('. ')) ||
     `${report.siteName} live web monitoring baseline and capability index.`;
 
   const uiNoiseHeadings = new Set([
@@ -179,9 +180,9 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
     'navigation',
   ]);
   const filteredHeadings = report.currentHeadings
-    .map((h) => h.text.trim())
+    .map((h) => normalizeSpaces(h.text))
     .filter((t) => t.length >= 4 && !uiNoiseHeadings.has(t.toLowerCase()));
-  const meaningfulHeading = filteredHeadings[0] || report.newRssItems[0]?.title?.trim() || '';
+  const meaningfulHeading = filteredHeadings[0] || normalizeSpaces(report.newRssItems[0]?.title || '');
 
   const combinedHeadline = report.isInitial
     ? pageTitle.length < 18 && meaningfulHeading
@@ -229,7 +230,7 @@ function buildGroundedFallbackArticle(report: ChangeReport): GeneratedArticlePay
     new Set(
       rawInnovationSource
         .split(/(?<=[.!?])\s+/)
-        .map((s) => s.replace(/\s+/g, ' ').trim())
+        .map((s) => normalizeSpaces(s))
         .filter(
           (s) =>
             s.length >= 28 &&

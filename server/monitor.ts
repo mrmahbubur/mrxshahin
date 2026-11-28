@@ -192,15 +192,15 @@ function extractJsonLdSignals($: cheerio.CheerioAPI): {
       for (const node of nodes) {
         const headline =
           typeof node.headline === 'string'
-            ? node.headline.trim()
+            ? normalizeSpaces(node.headline)
             : typeof node.name === 'string'
-              ? node.name.trim()
+              ? normalizeSpaces(node.name)
               : '';
         const description =
           typeof node.description === 'string'
-            ? node.description.trim()
+            ? normalizeSpaces(node.description)
             : typeof node.abstract === 'string'
-              ? node.abstract.trim()
+              ? normalizeSpaces(node.abstract)
               : '';
 
         if (!fallbackTitle && headline) fallbackTitle = headline;
@@ -212,34 +212,42 @@ function extractJsonLdSignals($: cheerio.CheerioAPI): {
           facts.push(description);
         }
 
-        if (typeof node.applicationCategory === 'string' && node.applicationCategory.trim()) {
-          const os = typeof node.operatingSystem === 'string' && node.operatingSystem.trim()
-            ? ` (${node.operatingSystem.trim()})`
-            : '';
-          const ver = typeof node.softwareVersion === 'string' && node.softwareVersion.trim()
-            ? ` v${node.softwareVersion.trim()}`
-            : '';
-          facts.push(`Application category: ${node.applicationCategory.trim()}${os}${ver}`);
+        if (typeof node.applicationCategory === 'string' && normalizeSpaces(node.applicationCategory)) {
+          const os =
+            typeof node.operatingSystem === 'string' && normalizeSpaces(node.operatingSystem)
+              ? ` (${normalizeSpaces(node.operatingSystem)})`
+              : '';
+          const ver =
+            typeof node.softwareVersion === 'string' && normalizeSpaces(node.softwareVersion)
+              ? ` v${normalizeSpaces(node.softwareVersion)}`
+              : '';
+          facts.push(`Application category: ${normalizeSpaces(node.applicationCategory)}${os}${ver}`);
         }
 
         if (Array.isArray(node.featureList)) {
           for (const f of node.featureList) {
-            if (typeof f === 'string' && f.trim()) facts.push(f.trim());
+            if (typeof f === 'string' && normalizeSpaces(f)) facts.push(normalizeSpaces(f));
           }
-        } else if (typeof node.featureList === 'string' && node.featureList.trim()) {
-          facts.push(node.featureList.trim());
+        } else if (typeof node.featureList === 'string' && normalizeSpaces(node.featureList)) {
+          facts.push(normalizeSpaces(node.featureList));
         }
 
         if (Array.isArray(node.knowsAbout)) {
-          const topics = node.knowsAbout.filter((t): t is string => typeof t === 'string' && t.trim().length > 0);
+          const topics = node.knowsAbout
+            .filter((t): t is string => typeof t === 'string')
+            .map((t) => normalizeSpaces(t))
+            .filter(Boolean);
           if (topics.length > 0) facts.push(`Focus areas: ${topics.join(', ')}`);
         }
 
         if (Array.isArray(node.keywords)) {
-          const kw = node.keywords.filter((k): k is string => typeof k === 'string' && k.trim().length > 0);
+          const kw = node.keywords
+            .filter((k): k is string => typeof k === 'string')
+            .map((k) => normalizeSpaces(k))
+            .filter(Boolean);
           if (kw.length > 0) facts.push(`Keywords: ${kw.join(', ')}`);
-        } else if (typeof node.keywords === 'string' && node.keywords.trim()) {
-          facts.push(`Keywords: ${node.keywords.trim()}`);
+        } else if (typeof node.keywords === 'string' && normalizeSpaces(node.keywords)) {
+          facts.push(`Keywords: ${normalizeSpaces(node.keywords)}`);
         }
 
         if (Array.isArray(node.sameAs)) {
