@@ -17,7 +17,12 @@ import {
 import { getGithubToken } from './env.ts';
 import { generateAndSavePostFromReport } from './generator.ts';
 import { normalizeExternalUrl, safeFetchText } from './security.ts';
-import { countWords, normalizeTextForDiff, tokenJaccardSimilarity } from './textUtils.ts';
+import {
+  countWords,
+  normalizeSpaces,
+  normalizeTextForDiff,
+  tokenJaccardSimilarity,
+} from './textUtils.ts';
 export { normalizeTextForDiff };
 import type {
   ChangeReport,
@@ -466,12 +471,11 @@ function extractPageSignals(html: string, baseUrl: string): {
 }
 
 function isReadableSpaSentence(raw: string): boolean {
-  const s = raw.replace(/\s+/g, ' ').trim();
+  const s = normalizeSpaces(raw);
   if (s.length < 18 || s.length > 360) return false;
   if (/^https?:\/\//i.test(s) || /^[\w./:-]+$/.test(s)) return false;
   if (/[{}[\];=<>]/.test(s)) return false;
-  const words = s.split(/\s+/);
-  if (words.length < 3) return false;
+  if (countWords(s) < 3) return false;
   return /[a-zA-Z]{3,}/.test(s);
 }
 
@@ -549,9 +553,9 @@ async function enrichSpaSignals(
           /(?:title|headline|subtitle|description|summary|tagline|speechNarrative|label)\s*:\s*"([^"\\]{6,320})"/g;
         let m: RegExpExecArray | null;
         while ((m = fieldRe.exec(jsText)) !== null && extraParagraphs.length < 24) {
-          const val = m[1].replace(/\s+/g, ' ').trim();
+          const val = normalizeSpaces(m[1]);
           if (/^(title|description|summary|label|placeholder|loading)/i.test(val)) continue;
-          if (val.length <= 75 && /^[A-Za-z0-9\s&/+\-–—:.]+$/.test(val) && val.split(/\s+/).length >= 2) {
+          if (val.length <= 75 && /^[A-Za-z0-9\s&/+\-–—:.]+$/.test(val) && countWords(val) >= 2) {
             if (!extraHeadings.includes(val)) extraHeadings.push(val);
           } else if (isReadableSpaSentence(val)) {
             extraParagraphs.push(val);
