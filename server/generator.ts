@@ -523,7 +523,7 @@ async function callGeminiForArticle(
       metaDescription: cleanAiMeta,
       summary: cleanAiSummary,
       tags: Array.isArray(parsed.tags)
-        ? parsed.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean).slice(0, 6)
+        ? parsed.tags.map((t) => normalizeSpaces(String(t)).toLowerCase()).filter(Boolean).slice(0, 6)
         : [slugify(report.siteName)],
       contentHtml: sanitizePostHtml(String(parsed.contentHtml)),
     },

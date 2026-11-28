@@ -694,7 +694,7 @@ async function fetchRssItems(rssUrl: string): Promise<RssEntry[]> {
     $('item').each((_, el) => {
       const title = normalizeSpaces($(el).find('title').first().text());
       const link = normalizeFeedLink($(el).find('link').first().text());
-      const pubDate = $(el).find('pubDate').first().text().trim();
+      const pubDate = normalizeSpaces($(el).find('pubDate').first().text());
       const desc = extractPlainText($(el).find('description').first().text());
       if (title) {
         items.push({ title, link, pubDate, summary: desc.slice(0, 400) });
@@ -705,7 +705,7 @@ async function fetchRssItems(rssUrl: string): Promise<RssEntry[]> {
       $('entry').each((_, el) => {
         const title = normalizeSpaces($(el).find('title').first().text());
         const link = normalizeFeedLink($(el).find('link').first().attr('href') || '');
-        const pubDate = $(el).find('updated, published').first().text().trim();
+        const pubDate = normalizeSpaces($(el).find('updated, published').first().text());
         const desc = extractPlainText($(el).find('summary, content').first().text());
         if (title) {
           items.push({ title, link, pubDate, summary: desc.slice(0, 400) });
@@ -955,10 +955,10 @@ function buildChangeReport(
 
   const changeHash = crypto.createHash('sha256').update(changeSignature).digest('hex');
 
-  const prevSentences = new Set(previous.mainText.split(/[.!?]+/).map((s) => s.trim()).filter((s) => s.length > 20));
+  const prevSentences = new Set(previous.mainText.split(/[.!?]+/).map((s) => normalizeSpaces(s)).filter((s) => s.length > 20));
   const changedSentences = current.mainText
     .split(/[.!?]+/)
-    .map((s) => s.trim())
+    .map((s) => normalizeSpaces(s))
     .filter((s) => s.length > 20 && !prevSentences.has(s))
     .slice(0, 6);
 
@@ -1014,7 +1014,7 @@ export async function syncHubSitesOnly(): Promise<{ discovered: number; added: n
 
         if (!seenUrls.has(abs)) {
           seenUrls.add(abs);
-          const shortTitle = rawLabel.split(/\s+[—–-]\s+/)[0]?.trim() || rawLabel;
+          const shortTitle = normalizeSpaces(rawLabel.split(/\s+[—–-]\s+/)[0] || rawLabel);
           candidates.push({
             name: deriveSiteName(shortTitle, abs),
             url: abs,
